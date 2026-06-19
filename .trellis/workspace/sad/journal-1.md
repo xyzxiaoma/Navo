@@ -170,3 +170,36 @@ Implemented in-memory bookmark search with debounced input, grouped folder/bookm
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Polish Theme And Docs
+
+**Date**: 2026-06-19
+**Task**: Polish Theme And Docs
+**Branch**: `main`
+
+### Summary
+
+Finished Navo V1 polish: added persisted sidebar collapse control, tightened focus/responsive/long-text UI behavior, completed Chinese-first README, updated CHANGELOG and CONTRIBUTING, documented theme/settings conventions, and verified lint, typecheck, Chrome, Edge, and optional Firefox builds.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa39ad9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
