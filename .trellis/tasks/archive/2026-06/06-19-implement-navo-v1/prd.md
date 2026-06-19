@@ -74,29 +74,29 @@ The parent task owns the full V1 requirement set, child-task map, cross-stage ac
 
 ## Acceptance Criteria
 
-- [ ] Opening a new tab displays the Navo page.
-- [ ] Chrome and Edge builds are configured through WXT.
-- [ ] Manifest permissions are limited to `bookmarks` and `storage`.
-- [ ] The app successfully reads the browser bookmark tree.
-- [ ] The left sidebar shows folder nodes only, supports nesting, selection, expand/collapse, hover, and selected state.
-- [ ] The main area shows direct subfolders before bookmarks, preserving browser order within each type.
-- [ ] Folder cards navigate into folders.
-- [ ] Bookmark cards show title, domain or fallback URL, and open the URL in the current tab.
-- [ ] Breadcrumbs show the current path and each segment is navigable.
-- [ ] Search matches title, URL, domain, folder name, and path text case-insensitively after trimming input.
-- [ ] Search results are grouped into folders and bookmarks.
-- [ ] Clearing search restores the previous folder view.
-- [ ] Loading, empty folder, no-result, permission, and read-failure states are visible and non-crashing.
-- [ ] Light, dark, and system theme modes work and persist after refresh.
-- [ ] Last selected folder is restored when possible after refresh.
-- [ ] Long titles and URLs truncate without breaking layout.
-- [ ] UI is clean, restrained, folder-workspace oriented, and does not resemble a traditional link directory or admin dashboard.
-- [ ] `pnpm install` works.
-- [ ] `pnpm dev:chrome` starts development.
-- [ ] `pnpm build:chrome` succeeds.
-- [ ] `pnpm build:edge` succeeds.
-- [ ] README, LICENSE, CHANGELOG, CONTRIBUTING, and `.gitignore` exist and match the V1 scope.
-- [ ] No secrets, browser profile data, `node_modules`, or build output are committed.
+- [x] Opening a new tab displays the Navo page.
+- [x] Chrome and Edge builds are configured through WXT.
+- [x] Manifest permissions are limited to `bookmarks` and `storage`.
+- [x] The app successfully reads the browser bookmark tree.
+- [x] The left sidebar shows folder nodes only, supports nesting, selection, expand/collapse, hover, and selected state.
+- [x] The main area shows direct subfolders before bookmarks, preserving browser order within each type.
+- [x] Folder cards navigate into folders.
+- [x] Bookmark cards show title, domain or fallback URL, and open the URL in the current tab.
+- [x] Breadcrumbs show the current path and each segment is navigable.
+- [x] Search matches title, URL, domain, folder name, and path text case-insensitively after trimming input.
+- [x] Search results are grouped into folders and bookmarks.
+- [x] Clearing search restores the previous folder view.
+- [x] Loading, empty folder, no-result, permission, and read-failure states are visible and non-crashing.
+- [x] Light, dark, and system theme modes work and persist after refresh.
+- [x] Last selected folder is restored when possible after refresh.
+- [x] Long titles and URLs truncate without breaking layout.
+- [x] UI is clean, restrained, folder-workspace oriented, and does not resemble a traditional link directory or admin dashboard.
+- [x] `pnpm install` works.
+- [x] `pnpm dev:chrome` starts development.
+- [x] `pnpm build:chrome` succeeds.
+- [x] `pnpm build:edge` succeeds.
+- [x] README, LICENSE, CHANGELOG, CONTRIBUTING, and `.gitignore` exist and match the V1 scope.
+- [x] No secrets, browser profile data, `node_modules`, or build output are committed.
 
 ## Notes
 
