@@ -1,25 +1,25 @@
 <script lang="ts">
-  type ThemeMode = 'light' | 'dark' | 'system';
+  import { onMount } from 'svelte';
+  import { getBookmarkTree } from '../../services/bookmark.service';
+  import { defaultSettings, getSettings, saveSettings } from '../../services/storage.service';
+  import type { NavoBookmarkNode } from '../../types/bookmark';
+  import type { NavoLocalSettings, ThemeMode } from '../../types/settings';
+  import {
+    findFolderById,
+    getChildTypeCounts,
+    getDirectChildCount,
+    getEffectiveRootFolders,
+    getFirstFolder,
+    getFolderChildren,
+    getPathNodes,
+  } from '../../utils/tree';
+  import { getDisplayUrl } from '../../utils/url';
+
+  type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 
   interface ThemeOption {
     value: ThemeMode;
     label: string;
-  }
-
-  interface FolderPreview {
-    id: string;
-    title: string;
-    depth: number;
-    count: number;
-    active?: boolean;
-  }
-
-  interface ContentCard {
-    id: string;
-    type: 'folder' | 'bookmark';
-    title: string;
-    meta: string;
-    detail: string;
   }
 
   const themeOptions: ThemeOption[] = [
@@ -28,50 +28,84 @@
     { value: 'dark', label: 'Dark' },
   ];
 
-  const folderPreview: FolderPreview[] = [
-    { id: 'bar', title: 'Bookmarks Bar', depth: 0, count: 24, active: true },
-    { id: 'dev', title: 'Development', depth: 1, count: 12 },
-    { id: 'ai', title: 'AI Tools', depth: 1, count: 8 },
-    { id: 'learn', title: 'Learning', depth: 1, count: 14 },
-    { id: 'other', title: 'Other Bookmarks', depth: 0, count: 31 },
-  ];
-
-  const contentCards: ContentCard[] = [
-    {
-      id: 'folder-dev',
-      type: 'folder',
-      title: 'Development',
-      meta: '12 items',
-      detail: 'Tools, docs, and repositories',
-    },
-    {
-      id: 'folder-learn',
-      type: 'folder',
-      title: 'Learning',
-      meta: '14 items',
-      detail: 'Courses, notes, and references',
-    },
-    {
-      id: 'github',
-      type: 'bookmark',
-      title: 'GitHub',
-      meta: 'github.com',
-      detail: 'https://github.com',
-    },
-    {
-      id: 'wxt',
-      type: 'bookmark',
-      title: 'WXT Documentation',
-      meta: 'wxt.dev',
-      detail: 'https://wxt.dev',
-    },
-  ];
-
-  let theme: ThemeMode = 'system';
+  let theme: ThemeMode = defaultSettings.theme;
   let searchDraft = '';
+  let status: LoadStatus = 'loading';
+  let errorMessage = '';
+  let settings: NavoLocalSettings = { ...defaultSettings };
+  let bookmarkTree: NavoBookmarkNode[] = [];
+  let selectedFolderId: string | undefined;
+
+  let rootFolders: NavoBookmarkNode[] = [];
+  let selectedFolder: NavoBookmarkNode | undefined;
+  let childFolders: NavoBookmarkNode[] = [];
+  let childBookmarks: NavoBookmarkNode[] = [];
+  let pathNodes: NavoBookmarkNode[] = [];
+  let folderCount = 0;
+  let bookmarkCount = 0;
+
+  $: rootFolders = getEffectiveRootFolders(bookmarkTree);
+  $: selectedFolder = selectedFolderId
+    ? findFolderById(bookmarkTree, selectedFolderId)
+    : undefined;
+  $: ({ folders: childFolders, bookmarks: childBookmarks } =
+    getFolderChildren(selectedFolder));
+  $: ({ folderCount, bookmarkCount } = getChildTypeCounts(selectedFolder));
+  $: pathNodes = selectedFolderId
+    ? getPathNodes(bookmarkTree, selectedFolderId).filter((node) => node.title)
+    : [];
+
+  onMount(() => {
+    void loadWorkspace();
+  });
+
+  async function loadWorkspace() {
+    status = 'loading';
+    errorMessage = '';
+
+    try {
+      const [loadedSettings, loadedTree] = await Promise.all([
+        getSettings(),
+        getBookmarkTree(),
+      ]);
+      const savedFolder = loadedSettings.lastSelectedFolderId
+        ? findFolderById(loadedTree, loadedSettings.lastSelectedFolderId)
+        : undefined;
+      const fallbackFolder = savedFolder ?? getFirstFolder(loadedTree);
+
+      settings = loadedSettings;
+      theme = loadedSettings.theme;
+      bookmarkTree = loadedTree;
+      selectedFolderId = fallbackFolder?.id;
+      status = fallbackFolder ? 'ready' : 'empty';
+    } catch (error) {
+      status = 'error';
+      errorMessage =
+        error instanceof Error ? error.message : 'Failed to load bookmarks.';
+    }
+  }
 
   function setTheme(nextTheme: ThemeMode) {
     theme = nextTheme;
+    void persistSettings({ ...settings, theme: nextTheme });
+  }
+
+  function selectFolder(folderId: string) {
+    const folder = findFolderById(bookmarkTree, folderId);
+    if (!folder) return;
+
+    selectedFolderId = folder.id;
+    void persistSettings({ ...settings, lastSelectedFolderId: folder.id });
+  }
+
+  async function persistSettings(nextSettings: NavoLocalSettings) {
+    settings = nextSettings;
+
+    try {
+      await saveSettings(nextSettings);
+    } catch {
+      // Settings persistence should not block bookmark browsing.
+    }
   }
 </script>
 
@@ -111,77 +145,130 @@
     </div>
   </header>
 
-  <div class="workspace" aria-label="Bookmark workspace preview">
+  <div class="workspace" aria-label="Bookmark workspace">
     <aside class="sidebar" aria-label="Bookmark folders">
       <div class="sidebar-heading">
         <span>Folders</span>
-        <small>{folderPreview.length} roots</small>
+        <small>{rootFolders.length} roots</small>
       </div>
 
-      <nav class="folder-tree" aria-label="Folder tree preview">
-        {#each folderPreview as folder (folder.id)}
-          <button
-            type="button"
-            class:active={folder.active}
-            class="folder-row"
-            style={`--depth: ${folder.depth}`}
-          >
-            <span class="folder-toggle" aria-hidden="true"></span>
-            <span class="folder-icon" aria-hidden="true"></span>
-            <span class="folder-title">{folder.title}</span>
-            <span class="folder-count">{folder.count}</span>
-          </button>
-        {/each}
-      </nav>
+      {#if status === 'loading'}
+        <div class="loading-list" aria-label="Loading folders">
+          <span class="skeleton-row"></span>
+          <span class="skeleton-row short"></span>
+          <span class="skeleton-row"></span>
+        </div>
+      {:else if rootFolders.length > 0}
+        <nav class="folder-tree" aria-label="Folder tree">
+          {#each rootFolders as folder (folder.id)}
+            <button
+              type="button"
+              class:active={selectedFolderId === folder.id}
+              class="folder-row"
+              style="--depth: 0"
+              aria-current={selectedFolderId === folder.id ? 'page' : false}
+              onclick={() => selectFolder(folder.id)}
+            >
+              <span class="folder-toggle" aria-hidden="true"></span>
+              <span class="folder-icon" aria-hidden="true"></span>
+              <span class="folder-title">{folder.title}</span>
+              <span class="folder-count">{getDirectChildCount(folder)}</span>
+            </button>
+          {/each}
+        </nav>
+      {:else}
+        <p class="sidebar-empty">No bookmark folders found.</p>
+      {/if}
     </aside>
 
     <main class="content" aria-labelledby="folder-title">
-      <nav class="breadcrumb" aria-label="Breadcrumb">
-        <button type="button">Bookmarks Bar</button>
-        <span aria-hidden="true">/</span>
-        <button type="button">Development</button>
-      </nav>
+      {#if status === 'loading'}
+        <section class="state-panel loading-state" aria-live="polite">
+          <span class="state-icon" aria-hidden="true"></span>
+          <div>
+            <h1 id="folder-title">Loading your bookmarks...</h1>
+            <p>Preparing your bookmark workspace.</p>
+          </div>
+        </section>
+      {:else if status === 'error'}
+        <section class="state-panel error-state" aria-live="polite">
+          <span class="state-icon" aria-hidden="true"></span>
+          <div>
+            <h1 id="folder-title">Failed to load bookmarks.</h1>
+            <p>{errorMessage || 'Please check extension permissions.'}</p>
+            <button type="button" class="state-action" onclick={loadWorkspace}>
+              Retry
+            </button>
+          </div>
+        </section>
+      {:else if status === 'empty' || !selectedFolder}
+        <section class="state-panel empty-state" aria-live="polite">
+          <span class="state-icon" aria-hidden="true"></span>
+          <div>
+            <h1 id="folder-title">This folder is empty.</h1>
+            <p>You can save pages in your browser bookmarks, then find them here.</p>
+          </div>
+        </section>
+      {:else}
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          {#each pathNodes as node, index (node.id)}
+            {#if index > 0}
+              <span aria-hidden="true">/</span>
+            {/if}
+            <button type="button" onclick={() => selectFolder(node.id)}>
+              {node.title}
+            </button>
+          {/each}
+        </nav>
 
-      <section class="content-heading">
-        <div>
-          <p class="section-label">Current folder</p>
-          <h1 id="folder-title">Development</h1>
-        </div>
-        <p class="content-meta">2 folders / 2 bookmarks</p>
-      </section>
+        <section class="content-heading">
+          <div>
+            <p class="section-label">Current folder</p>
+            <h1 id="folder-title">{selectedFolder.title}</h1>
+          </div>
+          <p class="content-meta">{folderCount} folders / {bookmarkCount} bookmarks</p>
+        </section>
 
-      <section class="card-grid" aria-label="Folder contents preview">
-        {#each contentCards as card (card.id)}
-          <article class={`content-card ${card.type}`}>
-            <span class="card-icon" aria-hidden="true"></span>
-            <div class="card-body">
-              <h2>{card.title}</h2>
-              <p>{card.meta}</p>
-              <small>{card.detail}</small>
+        {#if childFolders.length === 0 && childBookmarks.length === 0}
+          <section class="state-panel empty-state" aria-live="polite">
+            <span class="state-icon" aria-hidden="true"></span>
+            <div>
+              <h2>This folder is empty.</h2>
+              <p>You can save pages in your browser bookmarks, then find them here.</p>
             </div>
-          </article>
-        {/each}
-      </section>
+          </section>
+        {:else}
+          <section class="card-grid" aria-label="Folder contents">
+            {#each childFolders as folder (folder.id)}
+              <button
+                type="button"
+                class="content-card folder"
+                onclick={() => selectFolder(folder.id)}
+              >
+                <span class="card-icon" aria-hidden="true"></span>
+                <span class="card-body">
+                  <span class="card-title">{folder.title}</span>
+                  <span class="card-meta">{getDirectChildCount(folder)} items</span>
+                  <span class="card-detail">{folder.path.join(' / ')}</span>
+                </span>
+              </button>
+            {/each}
 
-      <section class="state-panel empty-state" aria-labelledby="empty-state-title">
-        <span class="state-icon" aria-hidden="true"></span>
-        <div>
-          <h2 id="empty-state-title">This folder is empty.</h2>
-          <p>You can save pages in your browser bookmarks, then find them here.</p>
-        </div>
-      </section>
-
-      <div class="state-templates" hidden>
-        <section class="state-panel loading-state">
-          <span class="state-icon" aria-hidden="true"></span>
-          <p>Loading your bookmarks...</p>
-        </section>
-        <section class="state-panel error-state">
-          <span class="state-icon" aria-hidden="true"></span>
-          <p>Failed to load bookmarks. Please check extension permissions.</p>
-        </section>
-      </div>
+            {#each childBookmarks as bookmark (bookmark.id)}
+              <a class="content-card bookmark" href={bookmark.url ?? '#'}>
+                <span class="card-icon" aria-hidden="true"></span>
+                <span class="card-body">
+                  <span class="card-title">{bookmark.title}</span>
+                  <span class="card-meta">{bookmark.domain ?? 'Unknown URL'}</span>
+                  <span class="card-detail">
+                    {bookmark.url ? getDisplayUrl(bookmark.url) : 'Untitled'}
+                  </span>
+                </span>
+              </a>
+            {/each}
+          </section>
+        {/if}
+      {/if}
     </main>
   </div>
 </div>
-

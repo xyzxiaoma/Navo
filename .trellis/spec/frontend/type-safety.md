@@ -2,50 +2,62 @@
 
 > Type safety patterns in this project.
 
----
-
 ## Overview
 
-<!--
-Document your project's type safety conventions here.
-
-Questions to answer:
-- What type system do you use?
-- How are types organized?
-- What validation library do you use?
-- How do you handle type inference?
--->
-
-(To be filled by the team)
-
----
+Navo uses TypeScript for extension UI, services, utilities, and WXT config. Shared data contracts live in `src/types/`; runtime data from browser APIs or storage is normalized at service and utility boundaries before UI code consumes it.
 
 ## Type Organization
 
-<!-- Where types are defined, shared types vs local types -->
-
-(To be filled by the team)
-
----
+- `src/types/bookmark.ts` owns bookmark-related contracts:
+  - `BrowserBookmarkNode`
+  - `NavoBookmarkNode`
+  - `NavoNodeType`
+  - `FolderChildren`
+- `src/types/settings.ts` owns persisted UI settings:
+  - `ThemeMode`
+  - `NavoLocalSettings`
+- Component-local display-only types may stay in the component until reused by another module.
 
 ## Validation
 
-<!-- Runtime validation patterns (Zod, Yup, io-ts, etc.) -->
+Browser APIs and extension storage are boundary inputs. Treat storage values as `unknown`, then normalize before returning typed data to the app.
 
-(To be filled by the team)
+```typescript
+function normalizeSettings(value: unknown): NavoLocalSettings {
+  if (!isRecord(value)) return { ...defaultSettings };
 
----
+  return {
+    theme: isThemeMode(value.theme) ? value.theme : defaultSettings.theme,
+    sidebarCollapsed:
+      typeof value.sidebarCollapsed === 'boolean'
+        ? value.sidebarCollapsed
+        : defaultSettings.sidebarCollapsed,
+  };
+}
+```
+
+Bookmark tree conversion belongs in `src/utils/tree.ts`; components should consume `NavoBookmarkNode`, not raw browser nodes.
 
 ## Common Patterns
 
-<!-- Type utilities, generics, type guards -->
-
-(To be filled by the team)
-
----
+- Use type guards for settings and payload normalization.
+- Keep `raw` on transformed bookmark nodes for future compatibility, but do not read `raw` from UI components.
+- Keep browser namespace compatibility inside `src/services/browser-api.ts`.
+- Derive folder children with shared helpers such as `getFolderChildren` so folder-before-bookmark ordering is consistent.
 
 ## Forbidden Patterns
 
-<!-- any, type assertions, etc. -->
+- Do not cast storage payloads directly inside Svelte components.
+- Do not call `chrome.*` or `browser.*` directly from UI components.
+- Do not persist the full bookmark tree in local storage.
+- Do not duplicate bookmark folder/bookmark detection in multiple components; use shared tree helpers.
 
-(To be filled by the team)
+## Tests Required
+
+After changing shared types, service boundaries, or tree transforms, run:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm build:chrome
+```
