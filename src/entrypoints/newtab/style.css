@@ -679,3 +679,54 @@ button {
 .folder-row.active .folder-select {
   color: var(--text-strong);
 }
+
+.search-results {
+  display: grid;
+  gap: 22px;
+}
+
+.result-group {
+  display: grid;
+  gap: 10px;
+}
+
+.result-group h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  color: inherit;
+  cursor: pointer;
+  padding: 12px 14px;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.search-result:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.result-body {
+  min-width: 0;
+}

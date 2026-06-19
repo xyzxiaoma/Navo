@@ -45,12 +45,24 @@ Bookmark tree conversion belongs in `src/utils/tree.ts`; components should consu
 - Keep browser namespace compatibility inside `src/services/browser-api.ts`.
 - Derive folder children with shared helpers such as `getFolderChildren` so folder-before-bookmark ordering is consistent.
 
+
+## Search Index Contract
+
+Search utilities consume transformed `NavoBookmarkNode` values, not raw browser bookmark nodes. Build the flat index once after bookmark loading, then search the in-memory index.
+
+```typescript
+const searchIndex = createSearchIndex(bookmarkTree);
+const results = searchBookmarks(searchIndex, query);
+```
+
+Search matching must stay in `src/utils/search.ts`; components may render grouped results but should not duplicate title, URL, domain, or path matching rules.
+
 ## Forbidden Patterns
 
 - Do not cast storage payloads directly inside Svelte components.
 - Do not call `chrome.*` or `browser.*` directly from UI components.
 - Do not persist the full bookmark tree in local storage.
-- Do not duplicate bookmark folder/bookmark detection in multiple components; use shared tree helpers.
+- Do not duplicate bookmark folder/bookmark detection in multiple components; use shared tree helpers.`n- Do not call bookmark APIs during search input changes; search the in-memory index.
 
 ## Tests Required
 
@@ -61,3 +73,4 @@ pnpm lint
 pnpm typecheck
 pnpm build:chrome
 ```
+

@@ -1,9 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { getBookmarkTree } from '../../services/bookmark.service';
   import { defaultSettings, getSettings, saveSettings } from '../../services/storage.service';
   import type { NavoBookmarkNode } from '../../types/bookmark';
   import type { NavoLocalSettings, ThemeMode } from '../../types/settings';
+  import {
+    createSearchIndex,
+    emptySearchResults,
+    searchBookmarks,
+    type GroupedSearchResults,
+    type SearchIndexItem,
+  } from '../../utils/search';
   import {
     findFolderById,
     getChildTypeCounts,
@@ -38,10 +45,13 @@
 
   let theme: ThemeMode = defaultSettings.theme;
   let searchDraft = '';
+  let searchQuery = '';
+  let searchDebounceHandle: ReturnType<typeof setTimeout> | undefined;
   let status: LoadStatus = 'loading';
   let errorMessage = '';
   let settings: NavoLocalSettings = { ...defaultSettings };
   let bookmarkTree: NavoBookmarkNode[] = [];
+  let searchIndex: SearchIndexItem[] = [];
   let selectedFolderId: string | undefined;
   let expandedFolderIds: string[] = [];
 
@@ -53,6 +63,9 @@
   let pathNodes: NavoBookmarkNode[] = [];
   let folderCount = 0;
   let bookmarkCount = 0;
+  let searchResults: GroupedSearchResults = emptySearchResults;
+  let searchResultCount = 0;
+  let hasSearchQuery = false;
 
   $: rootFolders = getEffectiveRootFolders(bookmarkTree);
   $: visibleFolderRows = getVisibleFolderRows(
@@ -69,9 +82,17 @@
   $: pathNodes = selectedFolderId
     ? getPathNodes(bookmarkTree, selectedFolderId).filter((node) => node.title)
     : [];
+  $: searchResults = searchBookmarks(searchIndex, searchQuery);
+  $: searchResultCount =
+    searchResults.folders.length + searchResults.bookmarks.length;
+  $: hasSearchQuery = searchQuery.trim().length > 0;
 
   onMount(() => {
     void loadWorkspace();
+  });
+
+  onDestroy(() => {
+    if (searchDebounceHandle) clearTimeout(searchDebounceHandle);
   });
 
   async function loadWorkspace() {
@@ -91,6 +112,7 @@
       settings = loadedSettings;
       theme = loadedSettings.theme;
       bookmarkTree = loadedTree;
+      searchIndex = createSearchIndex(loadedTree);
       selectedFolderId = fallbackFolder?.id;
       expandedFolderIds = getDefaultExpandedFolderIds(
         loadedTree,
@@ -102,6 +124,29 @@
       errorMessage =
         error instanceof Error ? error.message : 'Failed to load bookmarks.';
     }
+  }
+
+  function handleSearchInput(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    searchDraft = input.value;
+
+    if (searchDebounceHandle) clearTimeout(searchDebounceHandle);
+
+    searchDebounceHandle = setTimeout(() => {
+      searchQuery = searchDraft.trim();
+    }, 150);
+  }
+
+  function clearSearch() {
+    searchDraft = '';
+    searchQuery = '';
+
+    if (searchDebounceHandle) clearTimeout(searchDebounceHandle);
+  }
+
+  function selectSearchFolder(folderId: string) {
+    selectFolder(folderId);
+    clearSearch();
   }
 
   function setTheme(nextTheme: ThemeMode) {
@@ -208,8 +253,9 @@
       <span class="search-icon" aria-hidden="true"></span>
       <input
         id="bookmark-search"
-        bind:value={searchDraft}
+        value={searchDraft}
         type="search"
+        oninput={handleSearchInput}
         autocomplete="off"
         spellcheck="false"
         placeholder="Search bookmarks, folders, or URLs..."
@@ -315,6 +361,65 @@
             <p>You can save pages in your browser bookmarks, then find them here.</p>
           </div>
         </section>
+      {:else if hasSearchQuery}
+        <section class="content-heading">
+          <div>
+            <p class="section-label">Search results</p>
+            <h1 id="folder-title">{searchQuery}</h1>
+          </div>
+          <p class="content-meta">{searchResultCount} matches</p>
+        </section>
+
+        {#if searchResultCount === 0}
+          <section class="state-panel empty-state" aria-live="polite">
+            <span class="state-icon" aria-hidden="true"></span>
+            <div>
+              <h2>No results found.</h2>
+              <p>Try another keyword.</p>
+            </div>
+          </section>
+        {:else}
+          <section class="search-results" aria-label="Search results">
+            {#if searchResults.folders.length > 0}
+              <section class="result-group" aria-labelledby="folder-results-title">
+                <h2 id="folder-results-title">Folders</h2>
+                <div class="result-list">
+                  {#each searchResults.folders as result (result.id)}
+                    <button
+                      type="button"
+                      class="search-result folder"
+                      onclick={() => selectSearchFolder(result.id)}
+                    >
+                      <span class="card-icon" aria-hidden="true"></span>
+                      <span class="result-body">
+                        <span class="card-title">{result.title}</span>
+                        <span class="card-detail">{result.pathText}</span>
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              </section>
+            {/if}
+
+            {#if searchResults.bookmarks.length > 0}
+              <section class="result-group" aria-labelledby="bookmark-results-title">
+                <h2 id="bookmark-results-title">Bookmarks</h2>
+                <div class="result-list">
+                  {#each searchResults.bookmarks as result (result.id)}
+                    <a class="search-result bookmark" href={result.url ?? '#'}>
+                      <span class="card-icon" aria-hidden="true"></span>
+                      <span class="result-body">
+                        <span class="card-title">{result.title}</span>
+                        <span class="card-meta">{result.domain ?? 'Unknown URL'}</span>
+                        <span class="card-detail">{result.pathText}</span>
+                      </span>
+                    </a>
+                  {/each}
+                </div>
+              </section>
+            {/if}
+          </section>
+        {/if}
       {:else}
         <nav class="breadcrumb" aria-label="Breadcrumb">
           {#each pathNodes as node, index (node.id)}
@@ -378,5 +483,3 @@
     </main>
   </div>
 </div>
-
-
