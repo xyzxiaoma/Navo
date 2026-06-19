@@ -22,6 +22,14 @@
     label: string;
   }
 
+  interface VisibleFolderRow {
+    folder: NavoBookmarkNode;
+    depth: number;
+    childFolderCount: number;
+    expanded: boolean;
+    selected: boolean;
+  }
+
   const themeOptions: ThemeOption[] = [
     { value: 'system', label: 'System' },
     { value: 'light', label: 'Light' },
@@ -35,8 +43,10 @@
   let settings: NavoLocalSettings = { ...defaultSettings };
   let bookmarkTree: NavoBookmarkNode[] = [];
   let selectedFolderId: string | undefined;
+  let expandedFolderIds: string[] = [];
 
   let rootFolders: NavoBookmarkNode[] = [];
+  let visibleFolderRows: VisibleFolderRow[] = [];
   let selectedFolder: NavoBookmarkNode | undefined;
   let childFolders: NavoBookmarkNode[] = [];
   let childBookmarks: NavoBookmarkNode[] = [];
@@ -45,6 +55,11 @@
   let bookmarkCount = 0;
 
   $: rootFolders = getEffectiveRootFolders(bookmarkTree);
+  $: visibleFolderRows = getVisibleFolderRows(
+    rootFolders,
+    expandedFolderIds,
+    selectedFolderId,
+  );
   $: selectedFolder = selectedFolderId
     ? findFolderById(bookmarkTree, selectedFolderId)
     : undefined;
@@ -77,6 +92,10 @@
       theme = loadedSettings.theme;
       bookmarkTree = loadedTree;
       selectedFolderId = fallbackFolder?.id;
+      expandedFolderIds = getDefaultExpandedFolderIds(
+        loadedTree,
+        fallbackFolder?.id,
+      );
       status = fallbackFolder ? 'ready' : 'empty';
     } catch (error) {
       status = 'error';
@@ -95,7 +114,14 @@
     if (!folder) return;
 
     selectedFolderId = folder.id;
+    expandedFolderIds = addSelectedPath(expandedFolderIds, bookmarkTree, folder.id);
     void persistSettings({ ...settings, lastSelectedFolderId: folder.id });
+  }
+
+  function toggleFolder(folderId: string) {
+    expandedFolderIds = expandedFolderIds.includes(folderId)
+      ? expandedFolderIds.filter((expandedId) => expandedId !== folderId)
+      : [...expandedFolderIds, folderId];
   }
 
   async function persistSettings(nextSettings: NavoLocalSettings) {
@@ -106,6 +132,65 @@
     } catch {
       // Settings persistence should not block bookmark browsing.
     }
+  }
+
+  function getVisibleFolderRows(
+    folders: NavoBookmarkNode[],
+    expandedIds: string[],
+    activeFolderId?: string,
+    depth = 0,
+  ): VisibleFolderRow[] {
+    const rows: VisibleFolderRow[] = [];
+
+    for (const folder of folders) {
+      const childFoldersForRow = getFolderChildren(folder).folders;
+      const expanded = expandedIds.includes(folder.id);
+
+      rows.push({
+        folder,
+        depth,
+        childFolderCount: childFoldersForRow.length,
+        expanded,
+        selected: activeFolderId === folder.id,
+      });
+
+      if (expanded && childFoldersForRow.length > 0) {
+        rows.push(
+          ...getVisibleFolderRows(
+            childFoldersForRow,
+            expandedIds,
+            activeFolderId,
+            depth + 1,
+          ),
+        );
+      }
+    }
+
+    return rows;
+  }
+
+  function getDefaultExpandedFolderIds(
+    tree: NavoBookmarkNode[],
+    activeFolderId?: string,
+  ): string[] {
+    const expandedIds = getEffectiveRootFolders(tree).map((folder) => folder.id);
+    return activeFolderId ? addSelectedPath(expandedIds, tree, activeFolderId) : expandedIds;
+  }
+
+  function addSelectedPath(
+    expandedIds: string[],
+    tree: NavoBookmarkNode[],
+    activeFolderId: string,
+  ): string[] {
+    let nextExpandedIds = expandedIds;
+
+    for (const node of getPathNodes(tree, activeFolderId)) {
+      if (node.type === 'folder' && !nextExpandedIds.includes(node.id)) {
+        nextExpandedIds = [...nextExpandedIds, node.id];
+      }
+    }
+
+    return nextExpandedIds;
   }
 </script>
 
@@ -158,22 +243,43 @@
           <span class="skeleton-row short"></span>
           <span class="skeleton-row"></span>
         </div>
-      {:else if rootFolders.length > 0}
+      {:else if visibleFolderRows.length > 0}
         <nav class="folder-tree" aria-label="Folder tree">
-          {#each rootFolders as folder (folder.id)}
-            <button
-              type="button"
-              class:active={selectedFolderId === folder.id}
+          {#each visibleFolderRows as row (row.folder.id)}
+            <div
+              class:active={row.selected}
               class="folder-row"
-              style="--depth: 0"
-              aria-current={selectedFolderId === folder.id ? 'page' : false}
-              onclick={() => selectFolder(folder.id)}
+              style={`--depth: ${row.depth}`}
             >
-              <span class="folder-toggle" aria-hidden="true"></span>
-              <span class="folder-icon" aria-hidden="true"></span>
-              <span class="folder-title">{folder.title}</span>
-              <span class="folder-count">{getDirectChildCount(folder)}</span>
-            </button>
+              <button
+                type="button"
+                class="folder-toggle-button"
+                class:empty={row.childFolderCount === 0}
+                aria-label={row.expanded
+                  ? `Collapse ${row.folder.title}`
+                  : `Expand ${row.folder.title}`}
+                aria-expanded={row.childFolderCount > 0 ? row.expanded : undefined}
+                disabled={row.childFolderCount === 0}
+                onclick={() => toggleFolder(row.folder.id)}
+              >
+                <span
+                  class="folder-toggle"
+                  class:expanded={row.expanded}
+                  aria-hidden="true"
+                ></span>
+              </button>
+
+              <button
+                type="button"
+                class="folder-select"
+                aria-current={row.selected ? 'page' : false}
+                onclick={() => selectFolder(row.folder.id)}
+              >
+                <span class="folder-icon" aria-hidden="true"></span>
+                <span class="folder-title">{row.folder.title}</span>
+                <span class="folder-count">{getDirectChildCount(row.folder)}</span>
+              </button>
+            </div>
           {/each}
         </nav>
       {:else}
@@ -272,3 +378,5 @@
     </main>
   </div>
 </div>
+
+

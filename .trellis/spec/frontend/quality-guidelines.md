@@ -31,6 +31,23 @@ export default tseslint.config(
 
 Without this block, `pnpm lint` can fail on valid Svelte TypeScript with parse errors such as `Unexpected token ThemeMode`, even when `pnpm typecheck` passes.
 
+
+### Svelte State Should Avoid Mutable Built-ins
+
+Do not store native mutable `Set` or `Map` instances in Svelte component state. The lint rule `svelte/prefer-svelte-reactivity` flags this because mutations can bypass reactivity.
+
+Use immutable arrays for simple ID collections:
+
+```typescript
+let expandedFolderIds: string[] = [];
+
+expandedFolderIds = expandedFolderIds.includes(folderId)
+  ? expandedFolderIds.filter((expandedId) => expandedId !== folderId)
+  : [...expandedFolderIds, folderId];
+```
+
+If a real set/map API is needed, use Svelte's reactive collection helpers instead of native mutable collections.
+
 ## Forbidden Patterns
 
 - Do not rely on `svelte-check` alone for Svelte files; run `pnpm lint` as well so accessibility and style rules are enforced.
@@ -56,3 +73,4 @@ Use `pnpm build:edge` when the change touches manifest, WXT config, extension as
 - [ ] Svelte components with lists use keyed `{#each}` blocks.
 - [ ] Long visible text has truncation or wrapping rules.
 - [ ] Extension permissions remain limited to the task scope.
+
