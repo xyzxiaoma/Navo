@@ -104,3 +104,36 @@ Added browser API boundary, bookmark transformation utilities, settings storage,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Add Folder Navigation
+
+**Date**: 2026-06-19
+**Task**: Add Folder Navigation
+**Branch**: `main`
+
+### Summary
+
+Added recursive visible folder navigation, expand/collapse state, selected path expansion, breadcrumb navigation, and bookmark link cards.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8c3cb66` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
