@@ -12,30 +12,30 @@ The product SPEC may show root-level `entrypoints/` as an illustrative layout. I
 
 ```text
 src/
-├── entrypoints/
-│   └── newtab/
-│       ├── App.svelte
-│       ├── index.html
-│       ├── main.ts
-│       └── style.css
-└── app.d.ts
+|-- entrypoints/
+|   `-- newtab/
+|       |-- App.svelte
+|       |-- index.html
+|       |-- main.ts
+|       `-- style.css
+`-- app.d.ts
 
 public/
-└── icons/
-    ├── icon-16.png
-    ├── icon-48.png
-    └── icon-128.png
+`-- icons/
+    |-- icon-16.png
+    |-- icon-48.png
+    `-- icon-128.png
 ```
 
 Future feature code should be added under `src/` using the SPEC boundaries:
 
 ```text
 src/
-├── components/
-├── services/
-├── utils/
-├── types/
-└── styles/
+|-- components/
+|-- services/
+|-- utils/
+|-- types/
+`-- styles/
 ```
 
 ## Module Organization
@@ -87,3 +87,4 @@ src/entrypoints/newtab/App.svelte
 ```
 
 This keeps entrypoint discovery, generated types, and future source organization in one consistent tree.
+

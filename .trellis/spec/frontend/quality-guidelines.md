@@ -2,50 +2,57 @@
 
 > Code quality standards for frontend development.
 
----
-
 ## Overview
 
-<!--
-Document your project's quality standards here.
-
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
-
-(To be filled by the team)
-
----
-
-## Forbidden Patterns
-
-<!-- Patterns that should never be used and why -->
-
-(To be filled by the team)
-
----
+Navo uses ESLint flat config, TypeScript, Svelte 5, and WXT. Linting must cover both plain TypeScript files and TypeScript inside `.svelte` components.
 
 ## Required Patterns
 
-<!-- Patterns that must always be used -->
+### ESLint Must Parse TypeScript In Svelte Files
 
-(To be filled by the team)
+When `.svelte` files contain `<script lang="ts">`, configure the Svelte ESLint parser to delegate script parsing to the TypeScript parser:
 
----
+```typescript
+import svelte from 'eslint-plugin-svelte';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  ...svelte.configs.recommended,
+  {
+    files: ['**/*.svelte'],
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+      },
+    },
+  },
+);
+```
+
+Without this block, `pnpm lint` can fail on valid Svelte TypeScript with parse errors such as `Unexpected token ThemeMode`, even when `pnpm typecheck` passes.
+
+## Forbidden Patterns
+
+- Do not rely on `svelte-check` alone for Svelte files; run `pnpm lint` as well so accessibility and style rules are enforced.
+- Do not hand-edit generated WXT output under `.output/`; update source files or `wxt.config.ts` instead.
 
 ## Testing Requirements
 
-<!-- What level of testing is expected -->
+Run these checks after frontend source, WXT config, or shared lint config changes:
 
-(To be filled by the team)
+```bash
+pnpm lint
+pnpm typecheck
+pnpm build:chrome
+```
 
----
+Use `pnpm build:edge` when the change touches manifest, WXT config, extension assets, or release-readiness behavior.
 
 ## Code Review Checklist
 
-<!-- What reviewers should check -->
-
-(To be filled by the team)
+- [ ] `pnpm lint` passes.
+- [ ] `pnpm typecheck` passes.
+- [ ] `pnpm build:chrome` passes.
+- [ ] Svelte components with lists use keyed `{#each}` blocks.
+- [ ] Long visible text has truncation or wrapping rules.
+- [ ] Extension permissions remain limited to the task scope.
