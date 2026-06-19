@@ -137,3 +137,36 @@ Added recursive visible folder navigation, expand/collapse state, selected path 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Add Bookmark Search
+
+**Date**: 2026-06-19
+**Task**: Add Bookmark Search
+**Branch**: `main`
+
+### Summary
+
+Implemented in-memory bookmark search with debounced input, grouped folder/bookmark results, folder-result navigation, bookmark links, no-result state, and frontend search contract docs. Verified lint, typecheck, Chrome build, and Edge build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `098ad94` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
