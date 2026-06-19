@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check quality
+        run: |
+          pnpm lint
+          pnpm typecheck
+
+      - name: Package browser extensions
+        run: |
+          pnpm zip:chrome
+          pnpm zip:edge
+
+      - name: Prepare release metadata
+        id: metadata
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          TAG_NAME="v${VERSION}-build.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+
+          {
+            echo "version=${VERSION}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "tag_name=${TAG_NAME}"
+            echo "chrome_zip=.output/navo-${VERSION}-chrome.zip"
+            echo "edge_zip=.output/navo-${VERSION}-edge.zip"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          SHORT_SHA: ${{ steps.metadata.outputs.short_sha }}
+          CHROME_ZIP: ${{ steps.metadata.outputs.chrome_zip }}
+          EDGE_ZIP: ${{ steps.metadata.outputs.edge_zip }}
+        run: |
+          gh release create "$TAG_NAME" \
+            "$CHROME_ZIP" \
+            "$EDGE_ZIP" \
+            --target "$GITHUB_SHA" \
+            --title "Navo v${VERSION} (${SHORT_SHA})" \
+            --generate-notes
