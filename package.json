@@ -1,0 +1,42 @@
+{
+  "name": "navo",
+  "description": "A clean visual bookmark workspace for your browser new tab.",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "wxt",
+    "dev:chrome": "wxt -b chrome",
+    "dev:edge": "wxt -b edge",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:chrome": "wxt build -b chrome",
+    "build:edge": "wxt build -b edge",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:chrome": "wxt zip -b chrome",
+    "zip:edge": "wxt zip -b edge",
+    "zip:firefox": "wxt zip -b firefox",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "@wxt-dev/module-svelte": "^2.0.5",
+    "eslint": "^9.39.1",
+    "eslint-plugin-svelte": "^3.13.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-svelte": "^3.4.0",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "wxt": "^0.20.26"
+  }
+}

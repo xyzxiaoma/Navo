@@ -1,0 +1,28 @@
+{
+  "id": "implement-navo-v1",
+  "name": "implement-navo-v1",
+  "title": "Implement Navo V1",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sad",
+  "assignee": "sad",
+  "createdAt": "2026-06-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-19-initialize-navo-extension"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
