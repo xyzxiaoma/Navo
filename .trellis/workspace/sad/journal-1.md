@@ -71,3 +71,36 @@ Replaced the placeholder with the Navo workspace shell, responsive layout, theme
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Load Bookmark Tree
+
+**Date**: 2026-06-19
+**Task**: Load Bookmark Tree
+**Branch**: `main`
+
+### Summary
+
+Added browser API boundary, bookmark transformation utilities, settings storage, shared types, and app loading flow for real bookmark data.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `717fe93` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
