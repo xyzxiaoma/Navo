@@ -62,7 +62,8 @@ Search matching must stay in `src/utils/search.ts`; components may render groupe
 - Do not cast storage payloads directly inside Svelte components.
 - Do not call `chrome.*` or `browser.*` directly from UI components.
 - Do not persist the full bookmark tree in local storage.
-- Do not duplicate bookmark folder/bookmark detection in multiple components; use shared tree helpers.`n- Do not call bookmark APIs during search input changes; search the in-memory index.
+- Do not duplicate bookmark folder/bookmark detection in multiple components; use shared tree helpers.
+- Do not call bookmark APIs during search input changes; search the in-memory index.
 
 ## Tests Required
 

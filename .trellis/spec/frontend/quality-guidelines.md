@@ -48,6 +48,20 @@ expandedFolderIds = expandedFolderIds.includes(folderId)
 
 If a real set/map API is needed, use Svelte's reactive collection helpers instead of native mutable collections.
 
+### Theme And UI Preference Contract
+
+The new tab shell applies theme mode through `data-theme` on `.app-shell`; CSS variables own the actual light, dark, and system colors. Future theme polish should extend semantic variables rather than branching component markup by theme.
+
+```svelte
+<div class="app-shell" data-theme={theme}>
+  ...
+</div>
+```
+
+Persisted UI preferences such as theme, selected folder, and sidebar collapsed state must be saved by merging the current `NavoLocalSettings` object and calling `storage.service.ts`. Do not write raw storage payloads in Svelte components.
+
+Icon-only or symbol-only controls, such as the sidebar collapse toggle, need an accessible name (`aria-label`) and visible focus styling.
+
 ## Forbidden Patterns
 
 - Do not rely on `svelte-check` alone for Svelte files; run `pnpm lint` as well so accessibility and style rules are enforced.

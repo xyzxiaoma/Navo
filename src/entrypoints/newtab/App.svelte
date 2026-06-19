@@ -50,6 +50,7 @@
   let status: LoadStatus = 'loading';
   let errorMessage = '';
   let settings: NavoLocalSettings = { ...defaultSettings };
+  let sidebarCollapsed = defaultSettings.sidebarCollapsed;
   let bookmarkTree: NavoBookmarkNode[] = [];
   let searchIndex: SearchIndexItem[] = [];
   let selectedFolderId: string | undefined;
@@ -111,6 +112,7 @@
 
       settings = loadedSettings;
       theme = loadedSettings.theme;
+      sidebarCollapsed = loadedSettings.sidebarCollapsed;
       bookmarkTree = loadedTree;
       searchIndex = createSearchIndex(loadedTree);
       selectedFolderId = fallbackFolder?.id;
@@ -152,6 +154,12 @@
   function setTheme(nextTheme: ThemeMode) {
     theme = nextTheme;
     void persistSettings({ ...settings, theme: nextTheme });
+  }
+
+  function toggleSidebarCollapsed() {
+    const nextSidebarCollapsed = !sidebarCollapsed;
+    sidebarCollapsed = nextSidebarCollapsed;
+    void persistSettings({ ...settings, sidebarCollapsed: nextSidebarCollapsed });
   }
 
   function selectFolder(folderId: string) {
@@ -249,6 +257,17 @@
       </span>
     </a>
 
+    <button
+      type="button"
+      class="sidebar-toggle"
+      aria-label={sidebarCollapsed ? 'Show folders' : 'Hide folders'}
+      aria-pressed={sidebarCollapsed}
+      title={sidebarCollapsed ? 'Show folders' : 'Hide folders'}
+      onclick={toggleSidebarCollapsed}
+    >
+      <span aria-hidden="true">{sidebarCollapsed ? '>' : '<'}</span>
+    </button>
+
     <label class="search-box" for="bookmark-search">
       <span class="search-icon" aria-hidden="true"></span>
       <input
@@ -276,7 +295,11 @@
     </div>
   </header>
 
-  <div class="workspace" aria-label="Bookmark workspace">
+  <div
+    class="workspace"
+    class:collapsed={sidebarCollapsed}
+    aria-label="Bookmark workspace"
+  >
     <aside class="sidebar" aria-label="Bookmark folders">
       <div class="sidebar-heading">
         <span>Folders</span>

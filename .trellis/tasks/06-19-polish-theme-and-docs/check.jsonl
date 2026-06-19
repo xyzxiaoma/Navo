@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Final lint, typecheck, Chrome build, Edge build, and permission checks."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Verify settings persistence and no raw browser/storage access in UI."}

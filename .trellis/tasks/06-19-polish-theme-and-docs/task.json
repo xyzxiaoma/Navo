@@ -1,9 +1,9 @@
 {
-  "id": "implement-navo-v1",
-  "name": "implement-navo-v1",
-  "title": "Implement Navo V1",
+  "id": "polish-theme-and-docs",
+  "name": "polish-theme-and-docs",
+  "title": "Polish Theme And Docs",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -18,15 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "06-19-initialize-navo-extension",
-    "06-19-add-new-tab-layout",
-    "06-19-load-bookmark-tree",
-    "06-19-add-folder-navigation",
-    "06-19-add-bookmark-search",
-    "06-19-polish-theme-and-docs"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "06-19-implement-navo-v1",
   "relatedFiles": [],
   "notes": "",
   "meta": {}
