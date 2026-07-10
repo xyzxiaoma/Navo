@@ -38,17 +38,39 @@ Questions to answer:
 
 ## Styling Patterns
 
-<!-- How styles are applied (CSS modules, styled-components, Tailwind, etc.) -->
+Use entrypoint-scoped CSS files for the current new tab UI. Keep colors behind
+semantic CSS variables on `.app-shell` so theme changes do not branch component
+markup.
 
-(To be filled by the team)
+### Convention: Iconify Icons
+
+**What**: UI icons use Iconify's Svelte component with bundled icon data.
+
+**Why**: Browser extension pages should not depend on runtime icon API requests,
+and bundled icon data keeps new tab rendering deterministic under extension CSP.
+
+**Example**:
+
+```svelte
+<script lang="ts">
+  import Icon from '@iconify/svelte';
+  import searchIcon from '@iconify-icons/lucide/search';
+</script>
+
+<Icon icon={searchIcon} width="18" height="18" aria-hidden="true" />
+```
+
+**Do not** hand-draw common UI icons with CSS or inline SVG when an Iconify
+icon exists. Symbol-only controls still need an accessible name on the button.
 
 ---
 
 ## Accessibility
 
-<!-- A11y requirements and patterns -->
+Symbol-only controls need an accessible name through `aria-label` or equivalent
+visible text. Decorative icons should set `aria-hidden="true"` so assistive
+technology reads the control label, not the icon path.
 
-(To be filled by the team)
 
 ---
 

@@ -4,4 +4,5 @@ export interface NavoLocalSettings {
   theme: ThemeMode;
   lastSelectedFolderId?: string;
   sidebarCollapsed: boolean;
+  bookmarkClickCounts: Record<string, number>;
 }

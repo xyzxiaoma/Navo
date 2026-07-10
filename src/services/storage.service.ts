@@ -6,6 +6,7 @@ const SETTINGS_STORAGE_KEY = 'settings';
 export const defaultSettings: NavoLocalSettings = {
   theme: 'system',
   sidebarCollapsed: false,
+  bookmarkClickCounts: {},
 };
 
 export async function getSettings(): Promise<NavoLocalSettings> {
@@ -32,7 +33,27 @@ function normalizeSettings(value: unknown): NavoLocalSettings {
       typeof value.sidebarCollapsed === 'boolean'
         ? value.sidebarCollapsed
         : defaultSettings.sidebarCollapsed,
+    bookmarkClickCounts: normalizeBookmarkClickCounts(value.bookmarkClickCounts),
   };
+}
+
+function normalizeBookmarkClickCounts(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return { ...defaultSettings.bookmarkClickCounts };
+
+  const clickCounts: Record<string, number> = {};
+
+  for (const [bookmarkId, count] of Object.entries(value)) {
+    if (
+      bookmarkId.trim().length > 0 &&
+      typeof count === 'number' &&
+      Number.isFinite(count) &&
+      count > 0
+    ) {
+      clickCounts[bookmarkId] = count;
+    }
+  }
+
+  return clickCounts;
 }
 
 function isThemeMode(value: unknown): value is ThemeMode {
