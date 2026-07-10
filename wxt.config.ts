@@ -8,7 +8,7 @@ export default defineConfig({
     name: 'Navo',
     description: 'A clean visual bookmark workspace for your browser new tab.',
     version: '1.0.0',
-    permissions: ['bookmarks', 'storage'],
+    permissions: ['bookmarks', 'storage', 'favicon'],
     chrome_url_overrides: {
       newtab: 'newtab.html',
     },
