@@ -76,6 +76,7 @@
   }
 
   const fixedBookmarkLimit = 8;
+  const fixedPickerResultLimit = 8;
   const recentBookmarkLimit = 8;
   const googleSuggestionLimit = 9;
   const bookmarkFolderResultLimit = 6;
@@ -128,6 +129,10 @@
   let bookmarkSearchFocused = false;
   let bookmarkSearchDismissed = false;
   let activeBookmarkSearchOptionIndex = -1;
+  let fixedPickerInputElement: HTMLInputElement | undefined;
+  let fixedPickerOpen = false;
+  let fixedPickerDraft = '';
+  let activeFixedPickerOptionIndex = -1;
   let folderFilterDraft = '';
   let status: LoadStatus = 'loading';
   let settingsInitialized = false;
@@ -146,6 +151,7 @@
   let expandedFolderIds: string[] = [];
   let editorState: BookmarkEditorState | undefined;
   let mutating = false;
+  let mutationLocked = false;
   let contentScroller: HTMLElement | undefined;
   let sectionElements: Record<string, HTMLElement> = {};
   let sidebarRowElements: Record<string, HTMLElement> = {};
@@ -173,9 +179,12 @@
   let bookmarkSearchOptions: BookmarkSearchOption[] = [];
   let showBookmarkSearchResults = false;
   let activeBookmarkSearchOptionId: string | undefined;
+  let fixedPickerResults: SearchIndexItem[] = [];
+  let activeFixedPickerOptionId: string | undefined;
   let folderFilterVisibleIds: string[] | undefined;
   let directFolderFilterMatches: string[] = [];
 
+  $: mutationLocked = mutating || Boolean(editorState?.saving);
   $: rootFolders = getEffectiveRootFolders(bookmarkTree);
   $: folderSections = getFolderOverviewSections(bookmarkTree);
   $: allBookmarks = getAllUrlBookmarks(bookmarkTree);
@@ -183,6 +192,7 @@
   $: ({ visibleIds: folderFilterVisibleIds, directMatches: directFolderFilterMatches } = getFolderFilterState(rootFolders, folderFilterDraft));
   $: visibleFolderRows = getVisibleFolderRows(rootFolders, expandedFolderIds, visibleFolderId ?? selectedFolderId, 0, folderFilterVisibleIds, directFolderFilterMatches);
   $: fixedBookmarks = getFixedBookmarks(allBookmarks, settings.fixedBookmarkIds);
+  $: fixedPickerResults = getFixedPickerResults(bookmarkSearchIndex, fixedPickerDraft, settings.fixedBookmarkIds);
   $: recentBookmarks = getRecentBookmarks(allBookmarks, settings);
   $: {
     const results = searchBookmarks(bookmarkSearchIndex, bookmarkSearchDraft);
@@ -205,6 +215,10 @@
   $: if (activeBookmarkSearchOptionIndex >= bookmarkSearchOptions.length) activeBookmarkSearchOptionIndex = bookmarkSearchOptions.length - 1;
   $: activeBookmarkSearchOptionId = showBookmarkSearchResults && activeBookmarkSearchOptionIndex >= 0
     ? bookmarkSearchOptions[activeBookmarkSearchOptionIndex]?.id
+    : undefined;
+  $: if (activeFixedPickerOptionIndex >= fixedPickerResults.length) activeFixedPickerOptionIndex = fixedPickerResults.length - 1;
+  $: activeFixedPickerOptionId = fixedPickerOpen && activeFixedPickerOptionIndex >= 0
+    ? getFixedPickerOptionId(fixedPickerResults[activeFixedPickerOptionIndex]?.id)
     : undefined;
   $: if (visibleFolderId) keepSidebarRowVisible(visibleFolderId);
 
@@ -430,10 +444,13 @@
   }
 
   function toggleOrganizeMode() {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     organizeMode = !organizeMode;
     actionError = '';
-    if (!organizeMode) editorState = undefined;
+    if (!organizeMode) {
+      editorState = undefined;
+      closeFixedPicker();
+    }
   }
 
   async function openBookmark(bookmark: NavoBookmarkNode) {
@@ -490,6 +507,78 @@
       .filter((bookmark): bookmark is NavoBookmarkNode => Boolean(bookmark));
   }
 
+  function getFixedPickerResults(index: SearchIndexItem[], input: string, fixedIds: string[]) {
+    const availableBookmarks = index.filter((item) => item.type === 'bookmark' && !fixedIds.includes(item.id));
+    const query = input.trim();
+    if (!query) return availableBookmarks.slice(0, fixedPickerResultLimit);
+    return searchBookmarks(availableBookmarks, query).bookmarks.slice(0, fixedPickerResultLimit);
+  }
+
+  function openFixedPicker() {
+    if (!settingsInitialized || mutationLocked || settings.fixedBookmarkIds.length >= fixedBookmarkLimit) return;
+    fixedPickerOpen = true;
+    fixedPickerDraft = '';
+    activeFixedPickerOptionIndex = -1;
+    void tick().then(() => fixedPickerInputElement?.focus());
+  }
+
+  function closeFixedPicker() {
+    fixedPickerOpen = false;
+    fixedPickerDraft = '';
+    activeFixedPickerOptionIndex = -1;
+  }
+
+  function handleFixedPickerInput(event: Event) {
+    fixedPickerDraft = (event.currentTarget as HTMLInputElement).value;
+    activeFixedPickerOptionIndex = -1;
+  }
+
+  function handleFixedPickerKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (fixedPickerResults.length === 0) return;
+      event.preventDefault();
+      if (event.key === 'ArrowDown') {
+        activeFixedPickerOptionIndex = activeFixedPickerOptionIndex < fixedPickerResults.length - 1
+          ? activeFixedPickerOptionIndex + 1
+          : 0;
+      } else {
+        activeFixedPickerOptionIndex = activeFixedPickerOptionIndex > 0
+          ? activeFixedPickerOptionIndex - 1
+          : fixedPickerResults.length - 1;
+      }
+      return;
+    }
+
+    if (event.key === 'Enter' && activeFixedPickerOptionIndex >= 0) {
+      event.preventDefault();
+      const item = fixedPickerResults[activeFixedPickerOptionIndex];
+      if (item) void addFixedBookmark(item.node);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeFixedPicker();
+    }
+  }
+
+  async function addFixedBookmark(bookmark: NavoBookmarkNode) {
+    if (isFixed(bookmark.id)) return;
+    await toggleFixedBookmark(bookmark.id);
+    if (settings.fixedBookmarkIds.length >= fixedBookmarkLimit) {
+      closeFixedPicker();
+      return;
+    }
+    fixedPickerDraft = '';
+    activeFixedPickerOptionIndex = -1;
+    await tick();
+    fixedPickerInputElement?.focus();
+  }
+
+  function getFixedPickerOptionId(bookmarkId?: string) {
+    return bookmarkId ? `fixed-picker-option-${encodeURIComponent(bookmarkId)}` : undefined;
+  }
+
   function getRecentBookmarks(bookmarks: NavoBookmarkNode[], currentSettings: NavoLocalSettings) {
     return bookmarks
       .map((bookmark, browserIndex) => ({
@@ -509,7 +598,7 @@
   }
 
   async function toggleFixedBookmark(bookmarkId: string) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     const previousFixedIds = settings.fixedBookmarkIds;
     const fixed = previousFixedIds.includes(bookmarkId);
     if (!fixed && previousFixedIds.length >= fixedBookmarkLimit) {
@@ -537,7 +626,7 @@
   }
 
   async function moveFixedBookmark(index: number, offset: -1 | 1) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     const targetIndex = index + offset;
     const previousFixedIds = settings.fixedBookmarkIds;
     if (targetIndex < 0 || targetIndex >= previousFixedIds.length) return;
@@ -595,22 +684,18 @@
     }
   }
 
-  function isMutationLocked() {
-    return mutating || Boolean(editorState?.saving);
-  }
-
   function openCreateFolderEditor(parentId: string) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     editorState = { mode: 'create', kind: 'folder', parentId, title: '', url: '', error: '', saving: false };
   }
 
   function openCreateBookmarkEditor(parentId: string) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     editorState = { mode: 'create', kind: 'bookmark', parentId, title: '', url: '', error: '', saving: false };
   }
 
   function openEditFolderEditor(folder: NavoBookmarkNode) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     if (!canModifyBookmarkNode(folder)) {
       actionError = '这个浏览器管理的文件夹不能编辑。';
       return;
@@ -619,7 +704,7 @@
   }
 
   function openEditBookmarkEditor(bookmark: NavoBookmarkNode) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     editorState = { mode: 'edit', kind: 'bookmark', targetId: bookmark.id, title: bookmark.title, url: bookmark.url ?? '', error: '', saving: false };
   }
 
@@ -663,7 +748,7 @@
   }
 
   async function deleteBookmarkItem(bookmark: NavoBookmarkNode) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     if (!confirm(`删除书签“${bookmark.title}”？`)) return;
     await runBookmarkMutation(async () => {
       await deleteBookmark(bookmark.id);
@@ -672,7 +757,7 @@
   }
 
   async function deleteFolderItem(folder: NavoBookmarkNode) {
-    if (!settingsInitialized || isMutationLocked()) return;
+    if (!settingsInitialized || mutationLocked) return;
     if (!canModifyBookmarkNode(folder)) {
       actionError = '这个浏览器管理的文件夹不能删除。';
       return;
@@ -1131,7 +1216,7 @@
         {:else}
           <header class="overview-header">
             <div><p class="section-label">书签总览</p><h1 id="overview-title">全部书签</h1><p>{folderSections.length} 个文件夹 / {allBookmarks.length} 个书签</p></div>
-            <button type="button" class:active={organizeMode} class="organize-toggle" aria-pressed={organizeMode} disabled={!settingsInitialized || isMutationLocked()} onclick={toggleOrganizeMode}>{organizeMode ? '完成整理' : '整理书签'}</button>
+            <button type="button" class:active={organizeMode} class="organize-toggle" aria-pressed={organizeMode} disabled={!settingsInitialized || mutationLocked} onclick={toggleOrganizeMode}>{organizeMode ? '完成整理' : '整理书签'}</button>
           </header>
           <div class="bookmark-locator" class:open={showBookmarkSearchResults}>
             <label for="bookmark-locator-input">快速定位</label>
@@ -1200,10 +1285,40 @@
 
           {#if organizeMode}
             <section class="fixed-manager" aria-labelledby="fixed-manager-title">
-              <div class="section-heading"><div><p class="section-label">首页展示</p><h2 id="fixed-manager-title">固定区管理</h2></div><small>{settings.fixedBookmarkIds.length} / {fixedBookmarkLimit}</small></div>
+              <div class="section-heading fixed-manager-heading">
+                <div><p class="section-label">首页展示</p><h2 id="fixed-manager-title">固定区管理</h2></div>
+                <div class="fixed-manager-heading-actions">
+                  <small>{settings.fixedBookmarkIds.length} / {fixedBookmarkLimit}</small>
+                  <button type="button" class="fixed-add-button" disabled={!settingsInitialized || mutationLocked || settings.fixedBookmarkIds.length >= fixedBookmarkLimit} aria-expanded={fixedPickerOpen} aria-controls="fixed-bookmark-picker" onclick={() => fixedPickerOpen ? closeFixedPicker() : openFixedPicker()}><Icon icon={bookmarkPlusIcon} width="15" aria-hidden="true" />{fixedPickerOpen ? '收起' : '添加'}</button>
+                </div>
+              </div>
               {#if settings.fixedBookmarkIds.length >= fixedBookmarkLimit}<p class="fixed-limit-note" role="status">固定区已满（最多 8 项）。请先移除一项，再固定新的书签。</p>{/if}
-              {#if fixedBookmarks.length === 0}<p class="inline-empty">在下方书签行点击“固定”添加项目。</p>
-              {:else}<ol>{#each fixedBookmarks as bookmark, index (bookmark.id)}<li><span>{bookmark.title}</span><div><button type="button" disabled={!settingsInitialized || isMutationLocked() || index === 0} aria-label={`前移 ${bookmark.title}`} onclick={() => moveFixedBookmark(index, -1)}>↑</button><button type="button" disabled={!settingsInitialized || isMutationLocked() || index === fixedBookmarks.length - 1} aria-label={`后移 ${bookmark.title}`} onclick={() => moveFixedBookmark(index, 1)}>↓</button><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`取消固定 ${bookmark.title}`} onclick={() => toggleFixedBookmark(bookmark.id)}>移除</button></div></li>{/each}</ol>{/if}
+              {#if fixedPickerOpen}
+                <div id="fixed-bookmark-picker" class="fixed-picker">
+                  <label for="fixed-picker-input">添加到固定区</label>
+                  <div class="fixed-picker-box">
+                    <Icon icon={searchIcon} width="17" aria-hidden="true" />
+                    <input id="fixed-picker-input" bind:this={fixedPickerInputElement} type="search" value={fixedPickerDraft} placeholder="搜索书签、网址或所在文件夹" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="fixed-picker-results" aria-activedescendant={activeFixedPickerOptionId} oninput={handleFixedPickerInput} onkeydown={handleFixedPickerKeydown} />
+                    {#if fixedPickerDraft.trim()}<button type="button" class="fixed-picker-clear" aria-label="清空固定区搜索" onclick={() => { fixedPickerDraft = ''; activeFixedPickerOptionIndex = -1; fixedPickerInputElement?.focus(); }}><Icon icon={xIcon} width="15" aria-hidden="true" /></button>{/if}
+                  </div>
+                  <div id="fixed-picker-results" class="fixed-picker-results" role="listbox" aria-label="可添加到固定区的书签">
+                    {#if fixedPickerResults.length === 0}
+                      <p class="fixed-picker-empty">{fixedPickerDraft.trim() ? '没有匹配的可添加书签' : '没有更多可添加的书签'}</p>
+                    {:else}
+                      {#each fixedPickerResults as item, index (item.id)}
+                        {@const faviconUrls = getFaviconUrlCandidates(item.url)}
+                        <button id={getFixedPickerOptionId(item.id)} type="button" class:active={activeFixedPickerOptionIndex === index} class="fixed-picker-result" role="option" aria-selected={activeFixedPickerOptionIndex === index} disabled={mutationLocked} onclick={() => addFixedBookmark(item.node)}>
+                          <span class="bookmark-result-icon" aria-hidden="true"><Icon icon={bookmarkIcon} width="16" />{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
+                          <span class="bookmark-result-copy"><strong>{item.title}</strong><small>{item.domain ?? getDisplayUrl(item.url ?? '')} · {item.pathText}</small></span>
+                          <span class="fixed-picker-add-label">添加</span>
+                        </button>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+              {#if fixedBookmarks.length === 0}<p class="inline-empty">点击上方“添加”，搜索并选择要展示在首页的书签。</p>
+              {:else}<ol>{#each fixedBookmarks as bookmark, index (bookmark.id)}<li><span>{bookmark.title}</span><div><button type="button" disabled={!settingsInitialized || mutationLocked || index === 0} aria-label={`前移 ${bookmark.title}`} onclick={() => moveFixedBookmark(index, -1)}>↑</button><button type="button" disabled={!settingsInitialized || mutationLocked || index === fixedBookmarks.length - 1} aria-label={`后移 ${bookmark.title}`} onclick={() => moveFixedBookmark(index, 1)}>↓</button><button type="button" disabled={!settingsInitialized || mutationLocked} aria-label={`取消固定 ${bookmark.title}`} onclick={() => toggleFixedBookmark(bookmark.id)}>移除</button></div></li>{/each}</ol>{/if}
             </section>
           {/if}
 
@@ -1212,10 +1327,10 @@
               <section use:registerSection={section.folder.id} data-folder-id={section.folder.id} class:visible={visibleFolderId === section.folder.id} class:jump-target={jumpTargetFolderId === section.folder.id} class="folder-section">
                 <header class="folder-section-header">
                   <div><h2 class="folder-section-title" tabindex="-1">{section.folder.title}</h2><p title={section.path.map((node) => node.title).join(' / ')}>{section.path.map((node) => node.title).join(' / ')} · {section.bookmarks.length} 个直接书签</p></div>
-                  {#if organizeMode}<div class="folder-actions"><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`在 ${section.folder.title} 中新建文件夹`} onclick={() => openCreateFolderEditor(section.folder.id)}><Icon icon={folderPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`在 ${section.folder.title} 中新建书签`} onclick={() => openCreateBookmarkEditor(section.folder.id)}><Icon icon={bookmarkPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked() || !canModifyBookmarkNode(section.folder)} aria-label={`编辑文件夹 ${section.folder.title}`} onclick={() => openEditFolderEditor(section.folder)}><Icon icon={pencilIcon} width="15" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked() || !canModifyBookmarkNode(section.folder)} aria-label={`删除文件夹 ${section.folder.title}`} onclick={() => deleteFolderItem(section.folder)}><Icon icon={trashIcon} width="15" /></button></div>{/if}
+                  {#if organizeMode}<div class="folder-actions"><button type="button" disabled={!settingsInitialized || mutationLocked} aria-label={`在 ${section.folder.title} 中新建文件夹`} onclick={() => openCreateFolderEditor(section.folder.id)}><Icon icon={folderPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || mutationLocked} aria-label={`在 ${section.folder.title} 中新建书签`} onclick={() => openCreateBookmarkEditor(section.folder.id)}><Icon icon={bookmarkPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || mutationLocked || !canModifyBookmarkNode(section.folder)} aria-label={`编辑文件夹 ${section.folder.title}`} onclick={() => openEditFolderEditor(section.folder)}><Icon icon={pencilIcon} width="15" /></button><button type="button" disabled={!settingsInitialized || mutationLocked || !canModifyBookmarkNode(section.folder)} aria-label={`删除文件夹 ${section.folder.title}`} onclick={() => deleteFolderItem(section.folder)}><Icon icon={trashIcon} width="15" /></button></div>{/if}
                 </header>
                 {#if section.bookmarks.length === 0}<p class="folder-empty">空文件夹{organizeMode ? '，可使用上方按钮添加内容。' : ''}</p>
-                {:else}<div class="section-bookmark-grid">{#each section.bookmarks as bookmark (bookmark.id)}<article class="bookmark-row">{@render BookmarkButton(bookmark, true)}{#if organizeMode}<div class="row-actions"><button type="button" class:active={isFixed(bookmark.id)} aria-pressed={isFixed(bookmark.id)} disabled={!settingsInitialized || isMutationLocked() || (!isFixed(bookmark.id) && settings.fixedBookmarkIds.length >= fixedBookmarkLimit)} aria-label={isFixed(bookmark.id) ? `取消固定 ${bookmark.title}` : `固定 ${bookmark.title}`} onclick={() => toggleFixedBookmark(bookmark.id)}>{isFixed(bookmark.id) ? '取消固定' : '固定'}</button><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`编辑书签 ${bookmark.title}`} onclick={() => openEditBookmarkEditor(bookmark)}><Icon icon={pencilIcon} width="14" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`删除书签 ${bookmark.title}`} onclick={() => deleteBookmarkItem(bookmark)}><Icon icon={trashIcon} width="14" /></button></div>{/if}</article>{/each}</div>{/if}
+                {:else}<div class="section-bookmark-grid">{#each section.bookmarks as bookmark (bookmark.id)}<article class="bookmark-row">{@render BookmarkButton(bookmark, true)}{#if organizeMode}<div class="row-actions"><button type="button" class:active={isFixed(bookmark.id)} aria-pressed={isFixed(bookmark.id)} disabled={!settingsInitialized || mutationLocked || (!isFixed(bookmark.id) && settings.fixedBookmarkIds.length >= fixedBookmarkLimit)} aria-label={isFixed(bookmark.id) ? `取消固定 ${bookmark.title}` : `固定 ${bookmark.title}`} onclick={() => toggleFixedBookmark(bookmark.id)}>{isFixed(bookmark.id) ? '取消固定' : '固定'}</button><button type="button" disabled={!settingsInitialized || mutationLocked} aria-label={`编辑书签 ${bookmark.title}`} onclick={() => openEditBookmarkEditor(bookmark)}><Icon icon={pencilIcon} width="14" /></button><button type="button" disabled={!settingsInitialized || mutationLocked} aria-label={`删除书签 ${bookmark.title}`} onclick={() => deleteBookmarkItem(bookmark)}><Icon icon={trashIcon} width="14" /></button></div>{/if}</article>{/each}</div>{/if}
               </section>
             {/each}
           </div>
