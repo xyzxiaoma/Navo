@@ -8,3 +8,11 @@ dist
 *.log
 pnpm-debug.log*
 *.local
+
+# Local development metadata
+/.agents/
+/.claude/
+/.codex/
+/.trellis/
+/doc/
+/.learnings/
