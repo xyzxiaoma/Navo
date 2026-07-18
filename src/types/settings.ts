@@ -5,4 +5,6 @@ export interface NavoLocalSettings {
   lastSelectedFolderId?: string;
   sidebarCollapsed: boolean;
   bookmarkClickCounts: Record<string, number>;
+  fixedBookmarkIds: string[];
+  bookmarkLastOpenedAt: Record<string, number>;
 }

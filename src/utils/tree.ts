@@ -66,8 +66,13 @@ export function getPathNodes(
 export function getEffectiveRootFolders(
   nodes: NavoBookmarkNode[],
 ): NavoBookmarkNode[] {
-  if (nodes.length === 1 && nodes[0]?.children?.length) {
-    return nodes[0].children.filter(isNavoFolder);
+  if (
+    nodes.length === 1 &&
+    isNavoFolder(nodes[0]) &&
+    nodes[0].parentId === undefined &&
+    nodes[0].raw.parentId === undefined
+  ) {
+    return (nodes[0].children ?? []).filter(isNavoFolder);
   }
 
   return nodes.filter(isNavoFolder);
@@ -97,6 +102,59 @@ export function getFolderChildren(folder?: NavoBookmarkNode): FolderChildren {
     folders: children.filter(isNavoFolder),
     bookmarks: children.filter(isNavoBookmark),
   };
+}
+
+export interface FolderOverviewSection {
+  folder: NavoBookmarkNode;
+  depth: number;
+  path: NavoBookmarkNode[];
+  bookmarks: NavoBookmarkNode[];
+}
+
+export function getAllUrlBookmarks(
+  nodes: NavoBookmarkNode[],
+): NavoBookmarkNode[] {
+  const bookmarks: NavoBookmarkNode[] = [];
+
+  for (const node of nodes) {
+    if (isNavoBookmark(node) && node.url) bookmarks.push(node);
+    if (node.children) bookmarks.push(...getAllUrlBookmarks(node.children));
+  }
+
+  return bookmarks;
+}
+
+export function getFolderOverviewSections(
+  nodes: NavoBookmarkNode[],
+): FolderOverviewSection[] {
+  const sections: FolderOverviewSection[] = [];
+
+  for (const folder of getEffectiveRootFolders(nodes)) {
+    appendFolderOverviewSections(folder, [], 0, sections);
+  }
+
+  return sections;
+}
+
+function appendFolderOverviewSections(
+  folder: NavoBookmarkNode,
+  parentPath: NavoBookmarkNode[],
+  depth: number,
+  sections: FolderOverviewSection[],
+): void {
+  const path = [...parentPath, folder];
+  const children = getFolderChildren(folder);
+
+  sections.push({
+    folder,
+    depth,
+    path,
+    bookmarks: children.bookmarks.filter((bookmark) => Boolean(bookmark.url)),
+  });
+
+  for (const childFolder of children.folders) {
+    appendFolderOverviewSections(childFolder, path, depth + 1, sections);
+  }
 }
 
 export function getDirectChildCount(folder?: NavoBookmarkNode): number {

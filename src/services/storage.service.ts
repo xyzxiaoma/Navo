@@ -2,11 +2,14 @@ import type { NavoLocalSettings, ThemeMode } from '../types/settings';
 import { browserApi } from './browser-api';
 
 const SETTINGS_STORAGE_KEY = 'settings';
+const fixedBookmarkLimit = 8;
 
 export const defaultSettings: NavoLocalSettings = {
   theme: 'system',
   sidebarCollapsed: false,
   bookmarkClickCounts: {},
+  fixedBookmarkIds: [],
+  bookmarkLastOpenedAt: {},
 };
 
 export async function getSettings(): Promise<NavoLocalSettings> {
@@ -20,8 +23,16 @@ export async function saveSettings(settings: NavoLocalSettings): Promise<void> {
   });
 }
 
-function normalizeSettings(value: unknown): NavoLocalSettings {
-  if (!isRecord(value)) return { ...defaultSettings };
+export function normalizeSettings(value: unknown): NavoLocalSettings {
+  if (!isRecord(value)) return cloneDefaultSettings();
+
+  const bookmarkClickCounts = normalizePositiveNumberRecord(
+    value.bookmarkClickCounts,
+  );
+  const hasStoredFixedIds = Object.prototype.hasOwnProperty.call(
+    value,
+    'fixedBookmarkIds',
+  );
 
   return {
     theme: isThemeMode(value.theme) ? value.theme : defaultSettings.theme,
@@ -33,27 +44,69 @@ function normalizeSettings(value: unknown): NavoLocalSettings {
       typeof value.sidebarCollapsed === 'boolean'
         ? value.sidebarCollapsed
         : defaultSettings.sidebarCollapsed,
-    bookmarkClickCounts: normalizeBookmarkClickCounts(value.bookmarkClickCounts),
+    bookmarkClickCounts,
+    fixedBookmarkIds: hasStoredFixedIds
+      ? normalizeFixedBookmarkIds(value.fixedBookmarkIds)
+      : seedFixedBookmarkIds(bookmarkClickCounts),
+    bookmarkLastOpenedAt: normalizePositiveNumberRecord(
+      value.bookmarkLastOpenedAt,
+    ),
   };
 }
 
-function normalizeBookmarkClickCounts(value: unknown): Record<string, number> {
-  if (!isRecord(value)) return { ...defaultSettings.bookmarkClickCounts };
+function cloneDefaultSettings(): NavoLocalSettings {
+  return {
+    ...defaultSettings,
+    bookmarkClickCounts: {},
+    fixedBookmarkIds: [],
+    bookmarkLastOpenedAt: {},
+  };
+}
 
-  const clickCounts: Record<string, number> = {};
+function normalizeFixedBookmarkIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
 
-  for (const [bookmarkId, count] of Object.entries(value)) {
+  const ids: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (!id || ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length === fixedBookmarkLimit) break;
+  }
+
+  return ids;
+}
+
+function seedFixedBookmarkIds(clickCounts: Record<string, number>): string[] {
+  return Object.entries(clickCounts)
+    .sort(([firstId, firstCount], [secondId, secondCount]) => {
+      const countDifference = secondCount - firstCount;
+      return countDifference || (firstId < secondId ? -1 : firstId > secondId ? 1 : 0);
+    })
+    .slice(0, fixedBookmarkLimit)
+    .map(([bookmarkId]) => bookmarkId);
+}
+
+function normalizePositiveNumberRecord(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+
+  const values: Record<string, number> = {};
+
+  for (const [rawId, numberValue] of Object.entries(value)) {
+    const id = rawId.trim();
     if (
-      bookmarkId.trim().length > 0 &&
-      typeof count === 'number' &&
-      Number.isFinite(count) &&
-      count > 0
+      id &&
+      typeof numberValue === 'number' &&
+      Number.isFinite(numberValue) &&
+      numberValue > 0
     ) {
-      clickCounts[bookmarkId] = count;
+      values[id] = numberValue;
     }
   }
 
-  return clickCounts;
+  return values;
 }
 
 function isThemeMode(value: unknown): value is ThemeMode {
