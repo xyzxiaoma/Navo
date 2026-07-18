@@ -1,3 +1,4 @@
+import packageJson from './package.json';
 import { defineConfig } from 'wxt';
 
 export default defineConfig({
@@ -7,7 +8,7 @@ export default defineConfig({
   manifest: {
     name: 'Navo',
     description: 'A clean visual bookmark workspace for your browser new tab.',
-    version: '1.0.1',
+    version: packageJson.version,
     permissions: ['bookmarks', 'storage', 'favicon'],
     chrome_url_overrides: {
       newtab: 'newtab.html',

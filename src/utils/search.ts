@@ -22,24 +22,26 @@ export const emptySearchResults: GroupedSearchResults = {
 
 export function createSearchIndex(nodes: NavoBookmarkNode[]): SearchIndexItem[] {
   const items: SearchIndexItem[] = [];
+  const roots = hasSyntheticRoot(nodes) ? nodes[0].children ?? [] : nodes;
 
-  function walk(list: NavoBookmarkNode[]) {
+  function walk(list: NavoBookmarkNode[], parentPath: string[]) {
     for (const node of list) {
+      const path = [...parentPath, node.title];
       items.push({
         id: node.id,
         type: node.type,
         title: node.title,
         url: node.url,
         domain: node.domain,
-        pathText: node.path.join(' / '),
+        pathText: path.join(' / '),
         node,
       });
 
-      if (node.children?.length) walk(node.children);
+      if (node.children?.length) walk(node.children, path);
     }
   }
 
-  walk(nodes);
+  walk(roots, []);
   return items;
 }
 
@@ -66,6 +68,16 @@ export function searchBookmarks(
   }
 
   return results;
+}
+
+function hasSyntheticRoot(nodes: NavoBookmarkNode[]): boolean {
+  const root = nodes[0];
+  return (
+    nodes.length === 1 &&
+    root?.type === 'folder' &&
+    root.parentId === undefined &&
+    root.raw.parentId === undefined
+  );
 }
 
 function matchesSearchItem(item: SearchIndexItem, query: string): boolean {

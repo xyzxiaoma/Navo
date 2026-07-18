@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      approve_major:
+        description: Approve publishing a major version for this run
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -36,6 +42,68 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test release policy
+        run: pnpm test:release
+
+      - name: Validate release metadata
+        id: policy
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+          APPROVE_MAJOR: ${{ inputs.approve_major }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG_NAME="v${VERSION}"
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            RESULT="$(node scripts/release-policy.mjs check --base "$PUSH_BASE" --target HEAD --allow-major --json)"
+            RELEASE_LEVEL="$(node -e "const value = JSON.parse(process.argv[1]); process.stdout.write(value.releaseLevel)" "$RESULT")"
+          else
+            if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
+              TAG_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
+              if [[ "$TAG_COMMIT" != "$GITHUB_SHA" ]]; then
+                echo "${TAG_NAME} 已指向其他提交，不能覆盖。" >&2
+                exit 1
+              fi
+            fi
+
+            BASE_TAG="$(git tag --list 'v*' --sort=-version:refname | while read -r tag; do
+              if [[ "$tag" != "$TAG_NAME" && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "$tag"
+                break
+              fi
+            done)"
+            if [[ -z "$BASE_TAG" ]]; then
+              BASE_TAG="$(git tag --list 'v*-build.*' --sort=-creatordate | while read -r tag; do
+                if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-build\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "$tag"
+                  break
+                fi
+              done)"
+            fi
+            if [[ -z "$BASE_TAG" ]]; then
+              echo "找不到可用于比较的历史版本标签。" >&2
+              exit 1
+            fi
+
+            EXTRA_ARGS=()
+            if [[ "$APPROVE_MAJOR" == "true" ]]; then
+              EXTRA_ARGS+=(--allow-major)
+            fi
+            RESULT="$(node scripts/release-policy.mjs check --base "$BASE_TAG" --target HEAD --json "${EXTRA_ARGS[@]}")"
+            RELEASE_LEVEL="$(node -e "const value = JSON.parse(process.argv[1]); process.stdout.write(value.releaseLevel)" "$RESULT")"
+          fi
+
+          node scripts/release-policy.mjs notes --target HEAD > release-notes.md
+
+          {
+            echo "version=${VERSION}"
+            echo "tag_name=${TAG_NAME}"
+            echo "release_level=${RELEASE_LEVEL}"
+            echo "chrome_zip=.output/navo-${VERSION}-chrome.zip"
+            echo "edge_zip=.output/navo-${VERSION}-edge.zip"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check quality
         run: |
           pnpm lint
@@ -46,33 +114,49 @@ jobs:
           pnpm zip:chrome
           pnpm zip:edge
 
-      - name: Prepare release metadata
-        id: metadata
+      - name: Require manual approval for major release
+        if: github.event_name == 'push' && steps.policy.outputs.release_level == 'major'
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
-          TAG_NAME="v${VERSION}-build.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "## Major release approval required" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version ${{ steps.policy.outputs.version }} passed validation and packaging, but was not published." >> "$GITHUB_STEP_SUMMARY"
+          echo "Run this workflow manually with approve_major=true after explicit user approval." >> "$GITHUB_STEP_SUMMARY"
 
-          {
-            echo "version=${VERSION}"
-            echo "short_sha=${SHORT_SHA}"
-            echo "tag_name=${TAG_NAME}"
-            echo "chrome_zip=.output/navo-${VERSION}-chrome.zip"
-            echo "edge_zip=.output/navo-${VERSION}-edge.zip"
-          } >> "$GITHUB_OUTPUT"
+      - name: Reject duplicate push release
+        if: github.event_name == 'push' && steps.policy.outputs.release_level != 'major'
+        env:
+          TAG_NAME: ${{ steps.policy.outputs.tag_name }}
+        run: |
+          if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
+            echo "稳定版本标签 ${TAG_NAME} 已存在；每次推送必须使用新版本。" >&2
+            exit 1
+          fi
 
       - name: Publish GitHub release
+        if: github.event_name == 'workflow_dispatch' || steps.policy.outputs.release_level != 'major'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
-          VERSION: ${{ steps.metadata.outputs.version }}
-          SHORT_SHA: ${{ steps.metadata.outputs.short_sha }}
-          CHROME_ZIP: ${{ steps.metadata.outputs.chrome_zip }}
-          EDGE_ZIP: ${{ steps.metadata.outputs.edge_zip }}
+          TAG_NAME: ${{ steps.policy.outputs.tag_name }}
+          VERSION: ${{ steps.policy.outputs.version }}
+          CHROME_ZIP: ${{ steps.policy.outputs.chrome_zip }}
+          EDGE_ZIP: ${{ steps.policy.outputs.edge_zip }}
         run: |
-          gh release create "$TAG_NAME" \
-            "$CHROME_ZIP" \
-            "$EDGE_ZIP" \
-            --target "$GITHUB_SHA" \
-            --title "Navo v${VERSION} (${SHORT_SHA})" \
-            --generate-notes
+          if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
+            if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+              gh release edit "$TAG_NAME" \
+                --title "Navo v${VERSION}" \
+                --notes-file release-notes.md
+            else
+              gh release create "$TAG_NAME" \
+                --verify-tag \
+                --title "Navo v${VERSION}" \
+                --notes-file release-notes.md
+            fi
+            gh release upload "$TAG_NAME" "$CHROME_ZIP" "$EDGE_ZIP" --clobber
+          else
+            gh release create "$TAG_NAME" \
+              "$CHROME_ZIP" \
+              "$EDGE_ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "Navo v${VERSION}" \
+              --notes-file release-notes.md
+          fi

@@ -31,6 +31,7 @@
   import { defaultSettings, getSettings, saveSettings } from '../../services/storage.service';
   import type { NavoBookmarkNode } from '../../types/bookmark';
   import type { NavoLocalSettings, ThemeMode } from '../../types/settings';
+  import { createSearchIndex, searchBookmarks, type SearchIndexItem } from '../../utils/search';
   import {
     findFolderById,
     getAllUrlBookmarks,
@@ -55,6 +56,12 @@
     childFolderCount: number;
     expanded: boolean;
     selected: boolean;
+    matched: boolean;
+  }
+
+  interface BookmarkSearchOption {
+    item: SearchIndexItem;
+    id: string;
   }
 
   interface BookmarkEditorState {
@@ -71,6 +78,9 @@
   const fixedBookmarkLimit = 8;
   const recentBookmarkLimit = 8;
   const googleSuggestionLimit = 9;
+  const bookmarkFolderResultLimit = 6;
+  const bookmarkResultLimit = 8;
+  const jumpFeedbackDuration = 1200;
   const commonGoogleSuggestions = [
     '163邮箱',
     '1688',
@@ -113,6 +123,12 @@
   let searchFocused = false;
   let searchSuggestionsDismissed = false;
   let activeSearchOptionIndex = -1;
+  let bookmarkSearchInputElement: HTMLInputElement | undefined;
+  let bookmarkSearchDraft = '';
+  let bookmarkSearchFocused = false;
+  let bookmarkSearchDismissed = false;
+  let activeBookmarkSearchOptionIndex = -1;
+  let folderFilterDraft = '';
   let status: LoadStatus = 'loading';
   let settingsInitialized = false;
   let errorMessage = '';
@@ -132,10 +148,13 @@
   let mutating = false;
   let contentScroller: HTMLElement | undefined;
   let sectionElements: Record<string, HTMLElement> = {};
+  let sidebarRowElements: Record<string, HTMLElement> = {};
   let observer: IntersectionObserver | undefined;
   let observerRoot: HTMLElement | null | undefined;
   let observerResizeQuery: MediaQueryList | undefined;
   let restoreFolderOnViewOpen = false;
+  let jumpTargetFolderId: string | undefined;
+  let jumpFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
   let settingsWriteQueue: Promise<void> = Promise.resolve();
 
   let rootFolders: NavoBookmarkNode[] = [];
@@ -148,13 +167,33 @@
   let searchOptions: string[] = [];
   let showSearchSuggestions = false;
   let activeSearchOptionId: string | undefined;
+  let bookmarkSearchIndex: SearchIndexItem[] = [];
+  let bookmarkFolderResults: SearchIndexItem[] = [];
+  let bookmarkResults: SearchIndexItem[] = [];
+  let bookmarkSearchOptions: BookmarkSearchOption[] = [];
+  let showBookmarkSearchResults = false;
+  let activeBookmarkSearchOptionId: string | undefined;
+  let folderFilterVisibleIds: string[] | undefined;
+  let directFolderFilterMatches: string[] = [];
 
   $: rootFolders = getEffectiveRootFolders(bookmarkTree);
   $: folderSections = getFolderOverviewSections(bookmarkTree);
   $: allBookmarks = getAllUrlBookmarks(bookmarkTree);
-  $: visibleFolderRows = getVisibleFolderRows(rootFolders, expandedFolderIds, visibleFolderId ?? selectedFolderId);
+  $: bookmarkSearchIndex = createSearchIndex(bookmarkTree);
+  $: ({ visibleIds: folderFilterVisibleIds, directMatches: directFolderFilterMatches } = getFolderFilterState(rootFolders, folderFilterDraft));
+  $: visibleFolderRows = getVisibleFolderRows(rootFolders, expandedFolderIds, visibleFolderId ?? selectedFolderId, 0, folderFilterVisibleIds, directFolderFilterMatches);
   $: fixedBookmarks = getFixedBookmarks(allBookmarks, settings.fixedBookmarkIds);
   $: recentBookmarks = getRecentBookmarks(allBookmarks, settings);
+  $: {
+    const results = searchBookmarks(bookmarkSearchIndex, bookmarkSearchDraft);
+    const sectionIds = folderSections.map((section) => section.folder.id);
+    bookmarkFolderResults = results.folders.filter((item) => sectionIds.includes(item.id)).slice(0, bookmarkFolderResultLimit);
+    bookmarkResults = results.bookmarks.slice(0, bookmarkResultLimit);
+    bookmarkSearchOptions = [
+      ...bookmarkFolderResults.map((item) => ({ item, id: getBookmarkSearchOptionId(item) })),
+      ...bookmarkResults.map((item) => ({ item, id: getBookmarkSearchOptionId(item) })),
+    ];
+  }
   $: googleSuggestions = getGoogleSuggestions(searchDraft);
   $: searchOptions = searchDraft.trim() ? [searchDraft.trim(), ...googleSuggestions] : [];
   $: showSearchSuggestions = searchFocused && !searchSuggestionsDismissed && searchOptions.length > 0;
@@ -162,6 +201,12 @@
   $: activeSearchOptionId = showSearchSuggestions && activeSearchOptionIndex >= 0
     ? getSearchOptionId(activeSearchOptionIndex)
     : undefined;
+  $: showBookmarkSearchResults = bookmarkSearchFocused && !bookmarkSearchDismissed && Boolean(bookmarkSearchDraft.trim());
+  $: if (activeBookmarkSearchOptionIndex >= bookmarkSearchOptions.length) activeBookmarkSearchOptionIndex = bookmarkSearchOptions.length - 1;
+  $: activeBookmarkSearchOptionId = showBookmarkSearchResults && activeBookmarkSearchOptionIndex >= 0
+    ? bookmarkSearchOptions[activeBookmarkSearchOptionIndex]?.id
+    : undefined;
+  $: if (visibleFolderId) keepSidebarRowVisible(visibleFolderId);
 
   onMount(() => {
     observerResizeQuery = window.matchMedia('(max-width: 720px)');
@@ -172,6 +217,7 @@
   onDestroy(() => {
     observer?.disconnect();
     observerResizeQuery?.removeEventListener('change', handleObserverLayoutChange);
+    if (jumpFeedbackTimer) clearTimeout(jumpFeedbackTimer);
   });
 
   async function loadWorkspace() {
@@ -328,6 +374,24 @@
     };
   }
 
+  function registerSidebarRow(node: HTMLElement, folderId: string) {
+    sidebarRowElements = { ...sidebarRowElements, [folderId]: node };
+    return {
+      destroy() {
+        sidebarRowElements = Object.fromEntries(
+          Object.entries(sidebarRowElements).filter(([id]) => id !== folderId),
+        );
+      },
+    };
+  }
+
+  function keepSidebarRowVisible(folderId: string) {
+    if (sidebarCollapsed) return;
+    void tick().then(() => {
+      sidebarRowElements[folderId]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+    });
+  }
+
   async function selectFolder(folderId: string) {
     await scrollToFolder(folderId, true, settingsInitialized);
   }
@@ -338,6 +402,7 @@
     selectedFolderId = folderId;
     visibleFolderId = folderId;
     expandedFolderIds = addSelectedPath(expandedFolderIds, bookmarkTree, folderId);
+    if (focus) showJumpFeedback(folderId);
     if (persist) {
       void persistSettings((current) => ({ ...current, lastSelectedFolderId: folderId }), {
         errorMessage: '保存上次打开的文件夹失败。',
@@ -347,6 +412,15 @@
     const section = sectionElements[folderId];
     section?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
     if (focus) section?.querySelector<HTMLElement>('.folder-section-title')?.focus({ preventScroll: true });
+  }
+
+  function showJumpFeedback(folderId: string) {
+    if (jumpFeedbackTimer) clearTimeout(jumpFeedbackTimer);
+    jumpTargetFolderId = folderId;
+    jumpFeedbackTimer = setTimeout(() => {
+      jumpTargetFolderId = undefined;
+      jumpFeedbackTimer = undefined;
+    }, jumpFeedbackDuration);
   }
 
   function toggleFolder(folderId: string) {
@@ -726,6 +800,100 @@
     return `search-option-suggestion-${encodeURIComponent(searchOptions[index] ?? '')}`;
   }
 
+  function handleBookmarkSearchInput(event: Event) {
+    bookmarkSearchDraft = (event.currentTarget as HTMLInputElement).value;
+    bookmarkSearchFocused = true;
+    bookmarkSearchDismissed = false;
+    activeBookmarkSearchOptionIndex = -1;
+  }
+
+  function handleBookmarkSearchKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (bookmarkSearchOptions.length === 0) return;
+      event.preventDefault();
+      bookmarkSearchDismissed = false;
+      if (event.key === 'ArrowDown') {
+        activeBookmarkSearchOptionIndex = activeBookmarkSearchOptionIndex < bookmarkSearchOptions.length - 1
+          ? activeBookmarkSearchOptionIndex + 1
+          : 0;
+      } else {
+        activeBookmarkSearchOptionIndex = activeBookmarkSearchOptionIndex > 0
+          ? activeBookmarkSearchOptionIndex - 1
+          : bookmarkSearchOptions.length - 1;
+      }
+      return;
+    }
+
+    if (event.key === 'Enter' && showBookmarkSearchResults && activeBookmarkSearchOptionIndex >= 0) {
+      event.preventDefault();
+      const option = bookmarkSearchOptions[activeBookmarkSearchOptionIndex];
+      if (option) void activateBookmarkSearchResult(option.item);
+      return;
+    }
+
+    if (event.key === 'Escape' && showBookmarkSearchResults) {
+      event.preventDefault();
+      dismissBookmarkSearchResults();
+    }
+  }
+
+  async function activateBookmarkSearchResult(item: SearchIndexItem) {
+    bookmarkSearchDismissed = true;
+    activeBookmarkSearchOptionIndex = -1;
+    if (item.type === 'folder') {
+      bookmarkSearchDraft = '';
+      await selectFolder(item.id);
+      return;
+    }
+    await openBookmark(item.node);
+  }
+
+  function clearBookmarkSearch() {
+    bookmarkSearchDraft = '';
+    activeBookmarkSearchOptionIndex = -1;
+    bookmarkSearchDismissed = true;
+    bookmarkSearchFocused = true;
+    bookmarkSearchInputElement?.focus();
+  }
+
+  function dismissBookmarkSearchResults() {
+    activeBookmarkSearchOptionIndex = -1;
+    bookmarkSearchDismissed = true;
+  }
+
+  function getBookmarkSearchOptionId(item: SearchIndexItem) {
+    return `bookmark-search-option-${item.type}-${encodeURIComponent(item.id)}`;
+  }
+
+  function clearFolderFilter() {
+    folderFilterDraft = '';
+  }
+
+  function getFolderFilterState(folders: NavoBookmarkNode[], input: string) {
+    const query = input.trim().toLowerCase();
+    const visibleIds: string[] = [];
+    const directMatches: string[] = [];
+    if (!query) return { visibleIds: undefined, directMatches };
+
+    function addUnique(list: string[], id: string) {
+      if (!list.includes(id)) list.push(id);
+    }
+
+    function walk(list: NavoBookmarkNode[], ancestorIds: string[]) {
+      for (const folder of list) {
+        const pathIds = [...ancestorIds, folder.id];
+        if (folder.title.toLowerCase().includes(query)) {
+          addUnique(directMatches, folder.id);
+          for (const id of pathIds) addUnique(visibleIds, id);
+        }
+        walk(getFolderChildren(folder).folders, pathIds);
+      }
+    }
+
+    walk(folders, []);
+    return { visibleIds, directMatches };
+  }
+
   function getFaviconUrlCandidates(url?: string) {
     if (!url) return [];
     try {
@@ -756,13 +924,30 @@
     } else image.classList.add('failed');
   }
 
-  function getVisibleFolderRows(folders: NavoBookmarkNode[], expandedIds: string[], activeId?: string, depth = 0): VisibleFolderRow[] {
+  function getVisibleFolderRows(
+    folders: NavoBookmarkNode[],
+    expandedIds: string[],
+    activeId?: string,
+    depth = 0,
+    filterVisibleIds?: string[],
+    directMatches: string[] = [],
+  ): VisibleFolderRow[] {
     const rows: VisibleFolderRow[] = [];
     for (const folder of folders) {
+      if (filterVisibleIds && !filterVisibleIds.includes(folder.id)) continue;
       const childFolders = getFolderChildren(folder).folders;
-      const expanded = expandedIds.includes(folder.id);
-      rows.push({ folder, depth, childFolderCount: childFolders.length, expanded, selected: activeId === folder.id });
-      if (expanded) rows.push(...getVisibleFolderRows(childFolders, expandedIds, activeId, depth + 1));
+      const expanded = filterVisibleIds ? childFolders.some((child) => filterVisibleIds.includes(child.id)) : expandedIds.includes(folder.id);
+      rows.push({
+        folder,
+        depth,
+        childFolderCount: childFolders.length,
+        expanded,
+        selected: activeId === folder.id,
+        matched: directMatches.includes(folder.id),
+      });
+      if (expanded) {
+        rows.push(...getVisibleFolderRows(childFolders, expandedIds, activeId, depth + 1, filterVisibleIds, directMatches));
+      }
     }
     return rows;
   }
@@ -910,13 +1095,32 @@
       {#if sidebarCollapsed}<button type="button" class="sidebar-restore" aria-label="显示目录索引" disabled={!settingsInitialized} onclick={toggleSidebarCollapsed}><Icon icon={panelLeftOpenIcon} width="18" /></button>{/if}
       <aside class="sidebar" aria-label="文件夹目录索引">
         <div class="sidebar-heading"><div><strong>目录索引</strong><small>{folderSections.length} 个文件夹</small></div><button type="button" class="icon-button" aria-label="隐藏目录索引" disabled={!settingsInitialized} onclick={toggleSidebarCollapsed}><Icon icon={panelLeftCloseIcon} width="18" /></button></div>
+        <p class="sidebar-hint">滚动右侧会同步高亮，点击目录可快速定位。</p>
+        <div class="folder-filter">
+          <Icon icon={searchIcon} width="15" aria-hidden="true" />
+          <input
+            type="search"
+            value={folderFilterDraft}
+            aria-label="筛选文件夹"
+            placeholder="筛选文件夹"
+            autocomplete="off"
+            oninput={(event) => folderFilterDraft = event.currentTarget.value}
+          />
+          {#if folderFilterDraft.trim()}
+            <button type="button" aria-label="清空文件夹筛选" onclick={clearFolderFilter}><Icon icon={xIcon} width="15" aria-hidden="true" /></button>
+          {/if}
+        </div>
         <nav class="folder-tree" aria-label="文件夹目录">
-          {#each visibleFolderRows as row (row.folder.id)}
-            <div class:active={row.selected} class="folder-row" style={`--depth:${row.depth}`}>
-              <button type="button" class:empty={row.childFolderCount === 0} class="folder-toggle-button" disabled={row.childFolderCount === 0} aria-label={row.expanded ? `收起 ${row.folder.title}` : `展开 ${row.folder.title}`} aria-expanded={row.childFolderCount ? row.expanded : undefined} onclick={() => toggleFolder(row.folder.id)}><Icon class={row.expanded ? 'expanded' : ''} icon={chevronRightIcon} width="14" /></button>
-              <button type="button" class="folder-select" aria-current={row.selected ? 'location' : undefined} onclick={() => selectFolder(row.folder.id)}><Icon icon={folderIcon} width="16" /><span>{row.folder.title}</span><small>{getDirectChildCount(row.folder)}</small></button>
-            </div>
-          {/each}
+          {#if folderFilterDraft.trim() && visibleFolderRows.length === 0}
+            <p class="folder-filter-empty">没有匹配的文件夹</p>
+          {:else}
+            {#each visibleFolderRows as row (row.folder.id)}
+              <div use:registerSidebarRow={row.folder.id} class:active={row.selected} class:matched={row.matched} class="folder-row" style={`--depth:${row.depth}`}>
+                <button type="button" class:empty={row.childFolderCount === 0} class:filter-locked={Boolean(folderFilterDraft.trim())} class="folder-toggle-button" disabled={row.childFolderCount === 0 || Boolean(folderFilterDraft.trim())} aria-label={row.expanded ? `收起 ${row.folder.title}` : `展开 ${row.folder.title}`} aria-expanded={row.childFolderCount ? row.expanded : undefined} onclick={() => toggleFolder(row.folder.id)}><Icon class={row.expanded ? 'expanded' : ''} icon={chevronRightIcon} width="14" /></button>
+                <button type="button" class="folder-select" aria-current={row.selected ? 'location' : undefined} onclick={() => selectFolder(row.folder.id)}><Icon icon={folderIcon} width="16" /><span>{row.folder.title}</span><small>{getDirectChildCount(row.folder)}</small></button>
+              </div>
+            {/each}
+          {/if}
         </nav>
       </aside>
 
@@ -929,6 +1133,69 @@
             <div><p class="section-label">书签总览</p><h1 id="overview-title">全部书签</h1><p>{folderSections.length} 个文件夹 / {allBookmarks.length} 个书签</p></div>
             <button type="button" class:active={organizeMode} class="organize-toggle" aria-pressed={organizeMode} disabled={!settingsInitialized || isMutationLocked()} onclick={toggleOrganizeMode}>{organizeMode ? '完成整理' : '整理书签'}</button>
           </header>
+          <div class="bookmark-locator" class:open={showBookmarkSearchResults}>
+            <label for="bookmark-locator-input">快速定位</label>
+            <div class="bookmark-locator-box">
+              <Icon icon={searchIcon} width="18" aria-hidden="true" />
+              <input
+                id="bookmark-locator-input"
+                bind:this={bookmarkSearchInputElement}
+                type="search"
+                value={bookmarkSearchDraft}
+                placeholder="搜索文件夹、书签、网址或路径"
+                autocomplete="off"
+                spellcheck="false"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={showBookmarkSearchResults}
+                aria-controls="bookmark-locator-results"
+                aria-activedescendant={activeBookmarkSearchOptionId}
+                oninput={handleBookmarkSearchInput}
+                onkeydown={handleBookmarkSearchKeydown}
+                onfocus={() => {
+                  bookmarkSearchFocused = true;
+                  bookmarkSearchDismissed = false;
+                }}
+                onblur={() => setTimeout(() => bookmarkSearchFocused = false, 120)}
+              />
+              {#if bookmarkSearchDraft.trim()}
+                <button type="button" class="bookmark-locator-clear" aria-label="清空快速定位" onclick={clearBookmarkSearch}><Icon icon={xIcon} width="16" aria-hidden="true" /></button>
+              {/if}
+            </div>
+            {#if showBookmarkSearchResults}
+              <div id="bookmark-locator-results" class="bookmark-locator-results" role="listbox" aria-label="书签快速定位结果" tabindex="-1" onmousedown={(event) => event.preventDefault()}>
+                {#if bookmarkSearchOptions.length === 0}
+                  <div class="bookmark-locator-empty"><Icon icon={searchIcon} width="18" aria-hidden="true" /><span>没有匹配的文件夹或书签</span></div>
+                {:else}
+                  {#if bookmarkFolderResults.length > 0}
+                    <div class="bookmark-result-group" role="group" aria-label="文件夹">
+                      <p>文件夹</p>
+                      {#each bookmarkFolderResults as item (item.id)}
+                        {@const optionIndex = bookmarkSearchOptions.findIndex((option) => option.id === getBookmarkSearchOptionId(item))}
+                        <button id={getBookmarkSearchOptionId(item)} type="button" class:active={activeBookmarkSearchOptionIndex === optionIndex} class="bookmark-result-row" role="option" aria-selected={activeBookmarkSearchOptionIndex === optionIndex} onclick={() => activateBookmarkSearchResult(item)}>
+                          <span class="bookmark-result-icon folder"><Icon icon={folderIcon} width="17" aria-hidden="true" /></span>
+                          <span class="bookmark-result-copy"><strong>{item.title}</strong><small>{item.pathText}</small></span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if bookmarkResults.length > 0}
+                    <div class="bookmark-result-group" role="group" aria-label="书签">
+                      <p>书签</p>
+                      {#each bookmarkResults as item (item.id)}
+                        {@const optionIndex = bookmarkSearchOptions.findIndex((option) => option.id === getBookmarkSearchOptionId(item))}
+                        {@const faviconUrls = getFaviconUrlCandidates(item.url)}
+                        <button id={getBookmarkSearchOptionId(item)} type="button" class:active={activeBookmarkSearchOptionIndex === optionIndex} class="bookmark-result-row" role="option" aria-selected={activeBookmarkSearchOptionIndex === optionIndex} onclick={() => activateBookmarkSearchResult(item)}>
+                          <span class="bookmark-result-icon" aria-hidden="true"><Icon icon={bookmarkIcon} width="16" />{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
+                          <span class="bookmark-result-copy"><strong>{item.title}</strong><small>{item.domain ?? getDisplayUrl(item.url ?? '')} · {item.pathText}</small></span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
+          </div>
           {#if actionError}<p class="action-error" role="alert">{actionError}</p>{/if}
 
           {#if organizeMode}
@@ -942,7 +1209,7 @@
 
           <div class="folder-overview">
             {#each folderSections as section (section.folder.id)}
-              <section use:registerSection={section.folder.id} data-folder-id={section.folder.id} class:visible={visibleFolderId === section.folder.id} class="folder-section">
+              <section use:registerSection={section.folder.id} data-folder-id={section.folder.id} class:visible={visibleFolderId === section.folder.id} class:jump-target={jumpTargetFolderId === section.folder.id} class="folder-section">
                 <header class="folder-section-header">
                   <div><h2 class="folder-section-title" tabindex="-1">{section.folder.title}</h2><p title={section.path.map((node) => node.title).join(' / ')}>{section.path.map((node) => node.title).join(' / ')} · {section.bookmarks.length} 个直接书签</p></div>
                   {#if organizeMode}<div class="folder-actions"><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`在 ${section.folder.title} 中新建文件夹`} onclick={() => openCreateFolderEditor(section.folder.id)}><Icon icon={folderPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked()} aria-label={`在 ${section.folder.title} 中新建书签`} onclick={() => openCreateBookmarkEditor(section.folder.id)}><Icon icon={bookmarkPlusIcon} width="16" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked() || !canModifyBookmarkNode(section.folder)} aria-label={`编辑文件夹 ${section.folder.title}`} onclick={() => openEditFolderEditor(section.folder)}><Icon icon={pencilIcon} width="15" /></button><button type="button" disabled={!settingsInitialized || isMutationLocked() || !canModifyBookmarkNode(section.folder)} aria-label={`删除文件夹 ${section.folder.title}`} onclick={() => deleteFolderItem(section.folder)}><Icon icon={trashIcon} width="15" /></button></div>{/if}

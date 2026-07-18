@@ -2,7 +2,7 @@
   "name": "navo",
   "description": "A clean visual bookmark workspace for your browser new tab.",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "packageManager": "pnpm@10.20.0",
   "scripts": {
@@ -21,6 +21,9 @@
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "release:check": "node scripts/release-policy.mjs check",
+    "release:notes": "node scripts/release-policy.mjs notes",
+    "test:release": "node --test scripts/release-policy.test.mjs",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
