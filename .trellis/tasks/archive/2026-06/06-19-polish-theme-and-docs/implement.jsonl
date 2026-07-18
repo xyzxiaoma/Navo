@@ -1,3 +1,0 @@
-{"file":".trellis/spec/frontend/directory-structure.md","reason":"WXT source layout and newtab entrypoint ownership."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Svelte lint, reactive state, theme polish, and required build checks."}
-{"file":".trellis/spec/frontend/type-safety.md","reason":"Settings, bookmark tree, and search contract boundaries."}

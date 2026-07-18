@@ -1,4 +1,0 @@
-{"type":"spec","path":".trellis/tasks/06-20-homepage-bookmark-navigation/prd.md","reason":"Task requirements and acceptance criteria"}
-{"type":"design","path":".trellis/tasks/06-20-homepage-bookmark-navigation/design.md","reason":"Technical design for homepage, view switching, and click-count storage"}
-{"type":"plan","path":".trellis/tasks/06-20-homepage-bookmark-navigation/implement.md","reason":"Ordered implementation and validation checklist"}
-{"type":"spec","path":".trellis/spec/frontend/index.md","reason":"Frontend spec index"}
