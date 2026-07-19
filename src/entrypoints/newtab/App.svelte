@@ -7,7 +7,6 @@
   import fileQuestionIcon from '@iconify-icons/lucide/file-question';
   import folderIcon from '@iconify-icons/lucide/folder';
   import folderPlusIcon from '@iconify-icons/lucide/folder-plus';
-  import historyIcon from '@iconify-icons/lucide/history';
   import homeIcon from '@iconify-icons/lucide/home';
   import moonIcon from '@iconify-icons/lucide/moon';
   import panelLeftCloseIcon from '@iconify-icons/lucide/panel-left-close';
@@ -19,7 +18,7 @@
   import xIcon from '@iconify-icons/lucide/x';
   import { onDestroy, onMount, tick } from 'svelte';
   import { browserApi } from '../../services/browser-api';
-  import { getGoogleQuerySuggestions } from '../../services/google-suggestions.service';
+  import { requestBingQuerySuggestions } from '../../services/bing-suggestions.client';
   import {
     createBookmark,
     createFolder,
@@ -67,7 +66,7 @@
 
   type HomeSearchOption =
     | { kind: 'bookmark'; id: string; item: SearchIndexItem }
-    | { kind: 'query'; id: string; source: 'raw' | 'google'; query: string };
+    | { kind: 'query'; id: string; source: 'raw' | 'bing'; query: string };
 
   type BookmarkHomeSearchOption = Extract<HomeSearchOption, { kind: 'bookmark' }>;
   type QueryHomeSearchOption = Extract<HomeSearchOption, { kind: 'query' }>;
@@ -77,7 +76,7 @@
     index: number;
   }
 
-  type GoogleSuggestionStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
+  type BingSuggestionStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 
   interface BookmarkEditorState {
     mode: EditorMode;
@@ -144,10 +143,10 @@
   let restoreFolderOnViewOpen = false;
   let jumpTargetFolderId: string | undefined;
   let jumpFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
-  let googleSuggestionTimer: ReturnType<typeof setTimeout> | undefined;
-  let googleSuggestionController: AbortController | undefined;
-  let googleSuggestionRequestId = 0;
-  let scheduledGoogleSuggestionQuery = '';
+  let bingSuggestionTimer: ReturnType<typeof setTimeout> | undefined;
+  let bingSuggestionController: AbortController | undefined;
+  let bingSuggestionRequestId = 0;
+  let scheduledBingSuggestionQuery = '';
   let settingsWriteQueue: Promise<void> = Promise.resolve();
 
   let rootFolders: NavoBookmarkNode[] = [];
@@ -156,8 +155,9 @@
   let visibleFolderRows: VisibleFolderRow[] = [];
   let fixedBookmarks: NavoBookmarkNode[] = [];
   let recentBookmarks: NavoBookmarkNode[] = [];
-  let googleSuggestions: string[] = [];
-  let googleSuggestionStatus: GoogleSuggestionStatus = 'idle';
+  let bingSuggestions: string[] = [];
+  let bingSuggestionStatus: BingSuggestionStatus = 'idle';
+  let bingSuggestionError = '';
   let searchOptions: HomeSearchOption[] = [];
   let bookmarkSearchEntries: IndexedSearchOption<BookmarkHomeSearchOption>[] = [];
   let querySearchEntries: IndexedSearchOption<QueryHomeSearchOption>[] = [];
@@ -194,7 +194,7 @@
       ...bookmarkResults.map((item) => ({ item, id: getBookmarkSearchOptionId(item) })),
     ];
   }
-  $: searchOptions = getHomeSearchOptions(bookmarkSearchIndex, searchDraft, googleSuggestions);
+  $: searchOptions = getHomeSearchOptions(bookmarkSearchIndex, searchDraft, bingSuggestions);
   $: {
     bookmarkSearchEntries = [];
     querySearchEntries = [];
@@ -203,7 +203,7 @@
       else querySearchEntries.push({ option, index });
     });
   }
-  $: scheduleGoogleSuggestions(searchDraft);
+  $: scheduleBingSuggestions(searchDraft);
   $: showSearchSuggestions = searchFocused && !searchSuggestionsDismissed && searchOptions.length > 0;
   $: if (activeSearchOptionIndex >= searchOptions.length) activeSearchOptionIndex = searchOptions.length - 1;
   $: activeSearchOptionId = showSearchSuggestions && activeSearchOptionIndex >= 0
@@ -230,8 +230,8 @@
     observer?.disconnect();
     observerResizeQuery?.removeEventListener('change', handleObserverLayoutChange);
     if (jumpFeedbackTimer) clearTimeout(jumpFeedbackTimer);
-    if (googleSuggestionTimer) clearTimeout(googleSuggestionTimer);
-    googleSuggestionController?.abort();
+    if (bingSuggestionTimer) clearTimeout(bingSuggestionTimer);
+    bingSuggestionController?.abort();
   });
 
   async function loadWorkspace() {
@@ -915,62 +915,65 @@
       },
       ...suggestions.map((suggestion) => ({
         kind: 'query' as const,
-        id: `search-option-google-${encodeURIComponent(suggestion.toLowerCase())}`,
-        source: 'google' as const,
+        id: `search-option-bing-${encodeURIComponent(suggestion.toLowerCase())}`,
+        source: 'bing' as const,
         query: suggestion,
       })),
     ];
     return [...bookmarkOptions, ...queryOptions];
   }
 
-  function isFirstGoogleSearchOption(index: number) {
+  function isFirstBingSearchOption(index: number) {
     const previousOption = searchOptions[index - 1];
-    return !previousOption || previousOption.kind !== 'query' || previousOption.source !== 'google';
+    return !previousOption || previousOption.kind !== 'query' || previousOption.source !== 'bing';
   }
 
-  function scheduleGoogleSuggestions(input: string) {
+  function scheduleBingSuggestions(input: string) {
     const query = input.trim();
-    if (query === scheduledGoogleSuggestionQuery) return;
+    if (query === scheduledBingSuggestionQuery) return;
 
-    scheduledGoogleSuggestionQuery = query;
-    googleSuggestionRequestId += 1;
-    if (googleSuggestionTimer) clearTimeout(googleSuggestionTimer);
-    googleSuggestionTimer = undefined;
-    googleSuggestionController?.abort();
-    googleSuggestionController = undefined;
-    googleSuggestions = [];
+    scheduledBingSuggestionQuery = query;
+    bingSuggestionRequestId += 1;
+    if (bingSuggestionTimer) clearTimeout(bingSuggestionTimer);
+    bingSuggestionTimer = undefined;
+    bingSuggestionController?.abort();
+    bingSuggestionController = undefined;
+    bingSuggestions = [];
+    bingSuggestionError = '';
 
     if (!canRequestSearchSuggestions(query)) {
-      googleSuggestionStatus = 'idle';
+      bingSuggestionStatus = 'idle';
       return;
     }
 
-    const requestId = googleSuggestionRequestId;
-    googleSuggestionStatus = 'loading';
-    googleSuggestionTimer = setTimeout(() => {
-      googleSuggestionTimer = undefined;
-      void loadGoogleSuggestions(query, requestId);
+    const requestId = bingSuggestionRequestId;
+    bingSuggestionStatus = 'loading';
+    bingSuggestionTimer = setTimeout(() => {
+      bingSuggestionTimer = undefined;
+      void loadBingSuggestions(query, requestId);
     }, searchSuggestionDebounce);
   }
 
-  async function loadGoogleSuggestions(query: string, requestId: number) {
+  async function loadBingSuggestions(query: string, requestId: number) {
     const controller = new AbortController();
-    googleSuggestionController = controller;
+    bingSuggestionController = controller;
     try {
-      const suggestions = await getGoogleQuerySuggestions(query, controller.signal);
+      const suggestions = await requestBingQuerySuggestions(query, controller.signal);
       if (
-        requestId !== googleSuggestionRequestId ||
+        requestId !== bingSuggestionRequestId ||
         controller.signal.aborted ||
         searchDraft.trim() !== query
       ) return;
-      googleSuggestions = suggestions;
-      googleSuggestionStatus = 'ready';
-    } catch {
-      if (requestId !== googleSuggestionRequestId || controller.signal.aborted) return;
-      googleSuggestions = [];
-      googleSuggestionStatus = 'unavailable';
+      bingSuggestions = suggestions;
+      bingSuggestionError = '';
+      bingSuggestionStatus = 'ready';
+    } catch (error) {
+      if (requestId !== bingSuggestionRequestId || controller.signal.aborted) return;
+      bingSuggestions = [];
+      bingSuggestionError = error instanceof Error ? error.message : 'Unknown Bing suggestion error.';
+      bingSuggestionStatus = 'unavailable';
     } finally {
-      if (googleSuggestionController === controller) googleSuggestionController = undefined;
+      if (bingSuggestionController === controller) bingSuggestionController = undefined;
     }
   }
 
@@ -1194,11 +1197,11 @@
           <div class="search-box">
             <Icon icon={searchIcon} width="20" aria-hidden="true" />
             <input
-              id="google-search"
+              id="bing-search"
               bind:this={searchInputElement}
               value={searchDraft}
               type="search"
-              aria-label="搜索 Google 或输入网址"
+              aria-label="搜索 Bing 或输入网址"
               oninput={handleSearchInput}
               onkeydown={handleSearchKeydown}
               onfocus={() => {
@@ -1213,7 +1216,7 @@
               aria-controls="search-suggestions"
               aria-activedescendant={activeSearchOptionId}
               aria-autocomplete="list"
-              placeholder="问问 Google 或输入网址"
+              placeholder="问问 Bing 或输入网址"
             />
             {#if searchDraft.trim()}
               <button type="button" class="search-clear-button" aria-label="清空搜索" onclick={clearSearch}>
@@ -1227,8 +1230,8 @@
               class="search-suggestions"
               role="listbox"
               tabindex="-1"
-              aria-label="书签和 Google 搜索建议"
-              aria-busy={googleSuggestionStatus === 'loading'}
+              aria-label="书签和 Bing 搜索建议"
+              aria-busy={bingSuggestionStatus === 'loading'}
               onmousedown={(event) => event.preventDefault()}
             >
               {#if bookmarkSearchEntries.length > 0}
@@ -1282,10 +1285,10 @@
                         aria-selected={activeSearchOptionIndex === index}
                         onclick={() => activateHomeSearchOption(option)}
                       >
-                        <Icon icon={historyIcon} width="18" aria-hidden="true" />
+                        <Icon icon={searchIcon} width="18" aria-hidden="true" />
                         <span class="suggestion-copy">
                           <span class="suggestion-title">{option.query}</span>
-                          <span class="suggestion-meta">- {isDirectNavigationInput(option.query) ? '打开网址' : 'Google 搜索'}</span>
+                          <span class="suggestion-meta">- {isDirectNavigationInput(option.query) ? '打开网址' : 'Bing 搜索'}</span>
                         </span>
                       </button>
                       <button type="button" class="suggestion-clear" aria-label="清空搜索" onclick={clearSearch}>
@@ -1296,8 +1299,8 @@
                     <button
                       id={option.id}
                       type="button"
-                      class="suggestion-row suggestion-google"
-                      class:first-google={isFirstGoogleSearchOption(index)}
+                      class="suggestion-row suggestion-bing"
+                      class:first-bing={isFirstBingSearchOption(index)}
                       class:active={activeSearchOptionIndex === index}
                       role="option"
                       aria-selected={activeSearchOptionIndex === index}
@@ -1306,21 +1309,31 @@
                       <Icon class="suggestion-icon" icon={searchIcon} width="18" aria-hidden="true" />
                       <span class="suggestion-copy">
                         <span class="suggestion-title">{option.query}</span>
-                        <span class="suggestion-meta">Google 建议</span>
                       </span>
                     </button>
                   {/if}
                 {/each}
+                {#if bingSuggestionStatus === 'loading'}
+                  <div class="suggestion-status" role="status">
+                    <span class="suggestion-status-dot" aria-hidden="true"></span>
+                    正在获取 Bing 联想…
+                  </div>
+                {:else if bingSuggestionStatus === 'unavailable'}
+                  <div class="suggestion-status error" role="alert" title={bingSuggestionError}>
+                    <Icon icon={alertCircleIcon} width="16" aria-hidden="true" />
+                    Bing 联想请求失败：{bingSuggestionError || '请重新加载扩展后重试'}
+                  </div>
+                {/if}
               </div>
             </div>
           {/if}
           <span class="visually-hidden" role="status" aria-live="polite">
-            {googleSuggestionStatus === 'loading'
-              ? '正在获取 Google 搜索建议'
-              : googleSuggestionStatus === 'ready' && googleSuggestions.length > 0
-                ? `已获取 ${googleSuggestions.length} 条 Google 搜索建议`
-                : googleSuggestionStatus === 'unavailable'
-                  ? 'Google 搜索建议暂时不可用，仍可打开书签或直接搜索'
+            {bingSuggestionStatus === 'loading'
+              ? '正在获取 Bing 搜索建议'
+              : bingSuggestionStatus === 'ready' && bingSuggestions.length > 0
+                ? `已获取 ${bingSuggestions.length} 条 Bing 搜索建议`
+                : bingSuggestionStatus === 'unavailable'
+                  ? 'Bing 搜索建议暂时不可用，仍可打开书签或直接搜索'
                   : ''}
           </span>
         </form>

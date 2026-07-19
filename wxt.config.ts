@@ -10,7 +10,10 @@ export default defineConfig({
     description: 'A clean visual bookmark workspace for your browser new tab.',
     version: packageJson.version,
     permissions: ['bookmarks', 'storage', 'favicon'],
-    host_permissions: ['https://suggestqueries.google.com/*'],
+    host_permissions: [
+      'https://api.bing.com/*',
+      'https://www.bing.com/*',
+    ],
     chrome_url_overrides: {
       newtab: 'newtab.html',
     },

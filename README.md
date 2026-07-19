@@ -10,7 +10,7 @@ Navo is a clean visual bookmark workspace for your browser new tab.
 - 左侧文件夹树与右侧卡片浏览 / Folder tree with card-based browsing
 - 面包屑路径导航 / Breadcrumb navigation
 - 全局搜索书签、文件夹、URL、域名和路径 / Global search for bookmarks, folders, URLs, domains, and paths
-- 首页搜索优先匹配浏览器书签，并提供 Google 搜索词建议 / Homepage search prioritizes bookmarks and offers Google query suggestions
+- 首页搜索优先匹配浏览器书签，并提供 Bing 搜索词建议 / Homepage search prioritizes bookmarks and offers Bing query suggestions
 - 浅色、深色、跟随系统主题 / Light, dark, and system themes
 - 本地保存主题、最近文件夹和侧栏折叠偏好 / Local UI preferences for theme, last folder, and sidebar state
 - 书签数据仅在本地处理，无账号、无后端、无同步 / Bookmark data stays local, with no account, backend, or sync
@@ -59,7 +59,8 @@ pnpm zip:firefox
 3. 开启 Developer mode。
 4. 点击 Load unpacked。
 5. 选择 `.output/chrome-mv3`。
-6. 打开新标签页即可看到 Navo。
+6. 后续重新构建时，在扩展卡片上点击 Reload；仅刷新新标签页不会更新后台脚本或新增权限。
+7. 打开一个新的标签页即可看到 Navo。
 
 ### Microsoft Edge
 
@@ -68,7 +69,8 @@ pnpm zip:firefox
 3. 开启 Developer mode。
 4. 点击 Load unpacked。
 5. 选择 `.output/edge-mv3`。
-6. 打开新标签页即可看到 Navo。
+6. 后续重新构建时，在扩展卡片上点击 Reload；仅刷新新标签页不会更新后台脚本或新增权限。
+7. 打开一个新的标签页即可看到 Navo。
 
 ### Firefox
 
@@ -84,16 +86,17 @@ Navo 申请以下权限：
 bookmarks
 storage
 favicon
-https://suggestqueries.google.com/*
+https://api.bing.com/*
+https://www.bing.com/*
 ```
 
-`bookmarks` 用于读取浏览器书签树并展示为文件夹工作台。`storage` 用于保存主题、最近选中文件夹、侧栏状态和书签使用记录。`favicon` 用于显示书签站点图标。Google 建议域名权限仅用于在首页输入搜索词并短暂停顿后获取联想。
+`bookmarks` 用于读取浏览器书签树并展示为文件夹工作台。`storage` 用于保存主题、最近选中文件夹、侧栏状态和书签使用记录。`favicon` 用于显示书签站点图标。Bing 建议域名权限仅用于在首页输入搜索词并短暂停顿后获取联想。
 
-书签标题、网址、目录和完整书签树始终在本地匹配，不会发送给 Google。只有符合搜索条件的输入文字会发送到 `suggestqueries.google.com`；完整网址、域名、localhost、IP 地址和过长文本不会用于请求联想。Navo 不持久化搜索词或联想结果，接口不可用时仍可打开本地书签或直接搜索。
+书签标题、网址、目录和完整书签树始终在本地匹配，不会发送给 Bing。只有符合搜索条件的输入文字会先发送到 `api.bing.com`，接口不可用时回退到 `www.bing.com`；完整网址、域名、localhost、IP 地址和过长文本不会用于请求联想。Navo 不持久化搜索词或联想结果，接口不可用时仍可打开本地书签或直接搜索。
 
 Navo 没有账号和后端，不访问浏览历史，不读取网页内容，也不注入网页脚本。
 
-Navo processes bookmark data locally. Only eligible search text is sent directly to `suggestqueries.google.com` for autocomplete; URLs, host-like input, localhost, IP addresses, and excessively long input are excluded. Queries and suggestions are not persisted by Navo, and bookmark search continues to work when the service is unavailable.
+Navo processes bookmark data locally. Only eligible search text is sent directly to `api.bing.com` for autocomplete, falling back to `www.bing.com` when needed; URLs, host-like input, localhost, IP addresses, and excessively long input are excluded. Queries and suggestions are not persisted by Navo, and bookmark search continues to work when the service is unavailable.
 
 ## Roadmap
 
