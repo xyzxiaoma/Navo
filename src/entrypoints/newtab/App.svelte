@@ -1110,7 +1110,9 @@
   }
 
   function handleFaviconLoad(event: Event) {
-    (event.currentTarget as HTMLImageElement).classList.add('loaded');
+    const image = event.currentTarget as HTMLImageElement;
+    image.classList.add('loaded');
+    (image.previousElementSibling as HTMLElement | null)?.setAttribute('hidden', '');
   }
 
   function handleFaviconError(event: Event) {
@@ -1120,7 +1122,10 @@
     if (sources[nextIndex]) {
       image.dataset.index = String(nextIndex);
       image.src = sources[nextIndex];
-    } else image.classList.add('failed');
+    } else {
+      image.classList.add('failed');
+      (image.previousElementSibling as HTMLElement | null)?.removeAttribute('hidden');
+    }
   }
 
   function getVisibleFolderRows(
@@ -1252,7 +1257,7 @@
                         onclick={() => activateHomeSearchOption(option)}
                       >
                         <span class="suggestion-bookmark-icon" aria-hidden="true">
-                          <Icon icon={bookmarkIcon} width="16" />
+                          <span class="favicon-fallback"><Icon icon={bookmarkIcon} width="16" /></span>
                           {#if faviconUrls[0]}
                             <img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />
                           {/if}
@@ -1452,7 +1457,7 @@
                         {@const optionIndex = bookmarkSearchOptions.findIndex((option) => option.id === getBookmarkSearchOptionId(item))}
                         {@const faviconUrls = getFaviconUrlCandidates(item.url)}
                         <button id={getBookmarkSearchOptionId(item)} type="button" class:active={activeBookmarkSearchOptionIndex === optionIndex} class="bookmark-result-row" role="option" aria-selected={activeBookmarkSearchOptionIndex === optionIndex} onclick={() => activateBookmarkSearchResult(item)}>
-                          <span class="bookmark-result-icon" aria-hidden="true"><Icon icon={bookmarkIcon} width="16" />{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
+                          <span class="bookmark-result-icon" aria-hidden="true"><span class="favicon-fallback"><Icon icon={bookmarkIcon} width="16" /></span>{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
                           <span class="bookmark-result-copy"><strong>{item.title}</strong><small>{item.domain ?? getDisplayUrl(item.url ?? '')} · {item.pathText}</small></span>
                         </button>
                       {/each}
@@ -1489,7 +1494,7 @@
                       {#each fixedPickerResults as item, index (item.id)}
                         {@const faviconUrls = getFaviconUrlCandidates(item.url)}
                         <button id={getFixedPickerOptionId(item.id)} type="button" class:active={activeFixedPickerOptionIndex === index} class="fixed-picker-result" role="option" aria-selected={activeFixedPickerOptionIndex === index} disabled={mutationLocked} onclick={() => addFixedBookmark(item.node)}>
-                          <span class="bookmark-result-icon" aria-hidden="true"><Icon icon={bookmarkIcon} width="16" />{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
+                          <span class="bookmark-result-icon" aria-hidden="true"><span class="favicon-fallback"><Icon icon={bookmarkIcon} width="16" /></span>{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
                           <span class="bookmark-result-copy"><strong>{item.title}</strong><small>{item.domain ?? getDisplayUrl(item.url ?? '')} · {item.pathText}</small></span>
                           <span class="fixed-picker-add-label">添加</span>
                         </button>
@@ -1524,7 +1529,7 @@
 {#snippet BookmarkButton(bookmark: NavoBookmarkNode, compact = false)}
   {@const faviconUrls = getFaviconUrlCandidates(bookmark.url)}
   <button type="button" class:compact class="bookmark-button" title={`${bookmark.title} — ${bookmark.domain ?? getDisplayUrl(bookmark.url ?? '')}`} aria-label={`打开书签 ${bookmark.title}`} disabled={!settingsInitialized} onclick={() => openBookmark(bookmark)}>
-    <span class="site-icon" aria-hidden="true"><Icon icon={bookmarkIcon} width="17" />{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
+    <span class="site-icon" aria-hidden="true"><span class="favicon-fallback"><Icon icon={bookmarkIcon} width="17" /></span>{#if faviconUrls[0]}<img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />{/if}</span>
     <span class="bookmark-copy"><strong>{bookmark.title}</strong><small>{bookmark.domain ?? getDisplayUrl(bookmark.url ?? '')}</small></span>
   </button>
 {/snippet}
