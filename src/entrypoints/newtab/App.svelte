@@ -799,11 +799,34 @@
     setTheme(theme === 'dark' ? 'light' : 'dark');
   }
 
-  function toggleSidebarCollapsed() {
+  async function toggleSidebarCollapsed() {
     if (!settingsInitialized) return;
-    sidebarCollapsed = !sidebarCollapsed;
-    const nextSidebarCollapsed = sidebarCollapsed;
+
+    const nextSidebarCollapsed = !sidebarCollapsed;
+    const previousContentLeft = contentScroller?.getBoundingClientRect().left;
+
+    sidebarCollapsed = nextSidebarCollapsed;
     settings = { ...settings, sidebarCollapsed: nextSidebarCollapsed };
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.matchMedia('(max-width: 720px)').matches;
+    if (!reducedMotion && contentScroller && previousContentLeft !== undefined) {
+      await tick();
+      const contentOffset = previousContentLeft - contentScroller.getBoundingClientRect().left;
+      if (contentOffset !== 0) {
+        contentScroller.getAnimations().forEach((animation) => animation.cancel());
+        contentScroller.animate(
+          [
+            { transform: `translateX(${contentOffset}px)` },
+            { transform: 'translateX(0)' },
+          ],
+          {
+            duration: 260,
+            easing: 'cubic-bezier(.22, 1, .36, 1)',
+          },
+        );
+      }
+    }
+
     void persistSettings((current) => ({ ...current, sidebarCollapsed: nextSidebarCollapsed }), {
       errorMessage: '保存目录栏设置失败。',
     }).catch(() => undefined);
@@ -1177,7 +1200,7 @@
     </main>
   {:else}
     <div class:collapsed={sidebarCollapsed} class="workspace">
-      {#if sidebarCollapsed}<button type="button" class="sidebar-restore" aria-label="显示目录索引" disabled={!settingsInitialized} onclick={toggleSidebarCollapsed}><Icon icon={panelLeftOpenIcon} width="18" /></button>{/if}
+      <button type="button" class="sidebar-restore" aria-label="显示目录索引" aria-hidden={!sidebarCollapsed} disabled={!settingsInitialized || !sidebarCollapsed} onclick={toggleSidebarCollapsed}><Icon icon={panelLeftOpenIcon} width="18" /></button>
       <aside class="sidebar" aria-label="文件夹目录索引">
         <div class="sidebar-heading"><div><strong>目录索引</strong><small>{folderSections.length} 个文件夹</small></div><button type="button" class="icon-button" aria-label="隐藏目录索引" disabled={!settingsInitialized} onclick={toggleSidebarCollapsed}><Icon icon={panelLeftCloseIcon} width="18" /></button></div>
         <p class="sidebar-hint">滚动右侧会同步高亮，点击目录可快速定位。</p>
