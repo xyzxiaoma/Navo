@@ -2,7 +2,7 @@
   "name": "navo",
   "description": "A clean visual bookmark workspace for your browser new tab.",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.3.0",
   "type": "module",
   "packageManager": "pnpm@10.20.0",
   "scripts": {

@@ -2,6 +2,16 @@ const GOOGLE_SEARCH_URL = 'https://www.google.com/search';
 const HOST_LIKE_INPUT_PATTERN =
   /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#].*)?$/i;
 
+export function isDirectNavigationInput(input: string): boolean {
+  const query = input.trim();
+  return Boolean(query && (getHttpUrl(query) || HOST_LIKE_INPUT_PATTERN.test(query)));
+}
+
+export function canRequestSearchSuggestions(input: string): boolean {
+  const query = input.trim();
+  return Boolean(query && query.length <= 200 && !isDirectNavigationInput(query));
+}
+
 export function getDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
@@ -23,11 +33,8 @@ export function getSearchNavigationTarget(input: string): string | undefined {
   const query = input.trim();
   if (!query) return undefined;
 
-  const explicitUrl = getHttpUrl(query);
-  if (explicitUrl) return explicitUrl.href;
-
-  if (HOST_LIKE_INPUT_PATTERN.test(query)) {
-    const normalizedUrl = getHttpUrl(`https://${query}`);
+  if (isDirectNavigationInput(query)) {
+    const normalizedUrl = getHttpUrl(query) ?? getHttpUrl(`https://${query}`);
     if (normalizedUrl) return normalizedUrl.href;
   }
 

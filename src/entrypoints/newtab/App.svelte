@@ -19,6 +19,7 @@
   import xIcon from '@iconify-icons/lucide/x';
   import { onDestroy, onMount, tick } from 'svelte';
   import { browserApi } from '../../services/browser-api';
+  import { getGoogleQuerySuggestions } from '../../services/google-suggestions.service';
   import {
     createBookmark,
     createFolder,
@@ -43,7 +44,7 @@
     getPathNodes,
     type FolderOverviewSection,
   } from '../../utils/tree';
-  import { getDisplayUrl, getSearchNavigationTarget } from '../../utils/url';
+  import { canRequestSearchSuggestions, getDisplayUrl, getSearchNavigationTarget, isDirectNavigationInput } from '../../utils/url';
 
   type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
   type ActiveView = 'home' | 'bookmarks';
@@ -64,6 +65,12 @@
     id: string;
   }
 
+  type HomeSearchOption =
+    | { kind: 'bookmark'; id: string; item: SearchIndexItem }
+    | { kind: 'query'; id: string; source: 'raw' | 'google'; query: string };
+
+  type GoogleSuggestionStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
+
   interface BookmarkEditorState {
     mode: EditorMode;
     kind: EditorKind;
@@ -78,43 +85,11 @@
   const fixedBookmarkLimit = 8;
   const fixedPickerResultLimit = 8;
   const recentBookmarkLimit = 8;
-  const googleSuggestionLimit = 9;
+  const homeBookmarkResultLimit = 5;
   const bookmarkFolderResultLimit = 6;
   const bookmarkResultLimit = 8;
+  const searchSuggestionDebounce = 250;
   const jumpFeedbackDuration = 1200;
-  const commonGoogleSuggestions = [
-    '163邮箱',
-    '1688',
-    '163',
-    '163邮箱登录',
-    '111',
-    '11',
-    '1111',
-    '17track',
-    '126邮箱',
-    'github',
-    'gmail',
-    'google translate',
-    'chatgpt',
-    'youtube',
-    'bilibili',
-    '淘宝',
-    '京东',
-    '知乎',
-    '百度网盘',
-    'linux do',
-  ];
-  const googleSuggestionSuffixes = [
-    '官网',
-    '下载',
-    '登录',
-    '教程',
-    '文档',
-    'github',
-    '价格',
-    '是什么',
-    '怎么用',
-  ];
 
   let theme: ThemeMode = defaultSettings.theme;
   let activeView: ActiveView = 'home';
@@ -161,6 +136,10 @@
   let restoreFolderOnViewOpen = false;
   let jumpTargetFolderId: string | undefined;
   let jumpFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
+  let googleSuggestionTimer: ReturnType<typeof setTimeout> | undefined;
+  let googleSuggestionController: AbortController | undefined;
+  let googleSuggestionRequestId = 0;
+  let scheduledGoogleSuggestionQuery = '';
   let settingsWriteQueue: Promise<void> = Promise.resolve();
 
   let rootFolders: NavoBookmarkNode[] = [];
@@ -170,7 +149,8 @@
   let fixedBookmarks: NavoBookmarkNode[] = [];
   let recentBookmarks: NavoBookmarkNode[] = [];
   let googleSuggestions: string[] = [];
-  let searchOptions: string[] = [];
+  let googleSuggestionStatus: GoogleSuggestionStatus = 'idle';
+  let searchOptions: HomeSearchOption[] = [];
   let showSearchSuggestions = false;
   let activeSearchOptionId: string | undefined;
   let bookmarkSearchIndex: SearchIndexItem[] = [];
@@ -204,12 +184,12 @@
       ...bookmarkResults.map((item) => ({ item, id: getBookmarkSearchOptionId(item) })),
     ];
   }
-  $: googleSuggestions = getGoogleSuggestions(searchDraft);
-  $: searchOptions = searchDraft.trim() ? [searchDraft.trim(), ...googleSuggestions] : [];
+  $: searchOptions = getHomeSearchOptions(bookmarkSearchIndex, searchDraft, googleSuggestions);
+  $: scheduleGoogleSuggestions(searchDraft);
   $: showSearchSuggestions = searchFocused && !searchSuggestionsDismissed && searchOptions.length > 0;
   $: if (activeSearchOptionIndex >= searchOptions.length) activeSearchOptionIndex = searchOptions.length - 1;
   $: activeSearchOptionId = showSearchSuggestions && activeSearchOptionIndex >= 0
-    ? getSearchOptionId(activeSearchOptionIndex)
+    ? searchOptions[activeSearchOptionIndex]?.id
     : undefined;
   $: showBookmarkSearchResults = bookmarkSearchFocused && !bookmarkSearchDismissed && Boolean(bookmarkSearchDraft.trim());
   $: if (activeBookmarkSearchOptionIndex >= bookmarkSearchOptions.length) activeBookmarkSearchOptionIndex = bookmarkSearchOptions.length - 1;
@@ -232,6 +212,8 @@
     observer?.disconnect();
     observerResizeQuery?.removeEventListener('change', handleObserverLayoutChange);
     if (jumpFeedbackTimer) clearTimeout(jumpFeedbackTimer);
+    if (googleSuggestionTimer) clearTimeout(googleSuggestionTimer);
+    googleSuggestionController?.abort();
   });
 
   async function loadWorkspace() {
@@ -856,10 +838,22 @@
       return;
     }
 
+    if (event.key === 'Home' && showSearchSuggestions) {
+      event.preventDefault();
+      activeSearchOptionIndex = 0;
+      return;
+    }
+
+    if (event.key === 'End' && showSearchSuggestions) {
+      event.preventDefault();
+      activeSearchOptionIndex = searchOptions.length - 1;
+      return;
+    }
+
     if (event.key === 'Enter' && showSearchSuggestions && activeSearchOptionIndex >= 0) {
       event.preventDefault();
       const option = searchOptions[activeSearchOptionIndex];
-      if (option) navigateToSearchTarget(option);
+      if (option) activateHomeSearchOption(option);
       return;
     }
 
@@ -879,15 +873,96 @@
     if (target) window.location.assign(target);
   }
 
-  function getGoogleSuggestions(input: string) {
+  function getHomeSearchOptions(
+    index: SearchIndexItem[],
+    input: string,
+    suggestions: string[],
+  ): HomeSearchOption[] {
     const query = input.trim();
     if (!query) return [];
-    const lower = query.toLowerCase();
-    const values = [
-      ...commonGoogleSuggestions.filter((suggestion) => suggestion.toLowerCase().startsWith(lower) && suggestion.toLowerCase() !== lower),
-      ...googleSuggestionSuffixes.map((suffix) => `${query} ${suffix}`),
+
+    const bookmarkOptions: HomeSearchOption[] = searchBookmarks(index, query).bookmarks
+      .slice(0, homeBookmarkResultLimit)
+      .map((item) => ({
+        kind: 'bookmark',
+        id: `search-option-bookmark-${encodeURIComponent(item.id)}`,
+        item,
+      }));
+    const queryOptions: HomeSearchOption[] = [
+      {
+        kind: 'query',
+        id: 'search-option-raw',
+        source: 'raw',
+        query,
+      },
+      ...suggestions.map((suggestion) => ({
+        kind: 'query' as const,
+        id: `search-option-google-${encodeURIComponent(suggestion.toLowerCase())}`,
+        source: 'google' as const,
+        query: suggestion,
+      })),
     ];
-    return values.filter((value, index) => values.indexOf(value) === index).slice(0, googleSuggestionLimit);
+    return [...bookmarkOptions, ...queryOptions];
+  }
+
+  function isFirstGoogleSearchOption(index: number) {
+    const previousOption = searchOptions[index - 1];
+    return !previousOption || previousOption.kind !== 'query' || previousOption.source !== 'google';
+  }
+
+  function scheduleGoogleSuggestions(input: string) {
+    const query = input.trim();
+    if (query === scheduledGoogleSuggestionQuery) return;
+
+    scheduledGoogleSuggestionQuery = query;
+    googleSuggestionRequestId += 1;
+    if (googleSuggestionTimer) clearTimeout(googleSuggestionTimer);
+    googleSuggestionTimer = undefined;
+    googleSuggestionController?.abort();
+    googleSuggestionController = undefined;
+    googleSuggestions = [];
+
+    if (!canRequestSearchSuggestions(query)) {
+      googleSuggestionStatus = 'idle';
+      return;
+    }
+
+    const requestId = googleSuggestionRequestId;
+    googleSuggestionStatus = 'loading';
+    googleSuggestionTimer = setTimeout(() => {
+      googleSuggestionTimer = undefined;
+      void loadGoogleSuggestions(query, requestId);
+    }, searchSuggestionDebounce);
+  }
+
+  async function loadGoogleSuggestions(query: string, requestId: number) {
+    const controller = new AbortController();
+    googleSuggestionController = controller;
+    try {
+      const suggestions = await getGoogleQuerySuggestions(query, controller.signal);
+      if (
+        requestId !== googleSuggestionRequestId ||
+        controller.signal.aborted ||
+        searchDraft.trim() !== query
+      ) return;
+      googleSuggestions = suggestions;
+      googleSuggestionStatus = 'ready';
+    } catch {
+      if (requestId !== googleSuggestionRequestId || controller.signal.aborted) return;
+      googleSuggestions = [];
+      googleSuggestionStatus = 'unavailable';
+    } finally {
+      if (googleSuggestionController === controller) googleSuggestionController = undefined;
+    }
+  }
+
+  function activateHomeSearchOption(option: HomeSearchOption) {
+    dismissSearchSuggestions();
+    if (option.kind === 'bookmark') {
+      void openBookmark(option.item.node);
+      return;
+    }
+    navigateToSearchTarget(option.query);
   }
 
   function clearSearch() {
@@ -901,11 +976,6 @@
   function dismissSearchSuggestions() {
     activeSearchOptionIndex = -1;
     searchSuggestionsDismissed = true;
-  }
-
-  function getSearchOptionId(index: number) {
-    if (index === 0) return 'search-option-primary';
-    return `search-option-suggestion-${encodeURIComponent(searchOptions[index] ?? '')}`;
   }
 
   function handleBookmarkSearchInput(event: Event) {
@@ -1139,45 +1209,86 @@
               class="search-suggestions"
               role="listbox"
               tabindex="-1"
-              aria-label="搜索建议"
+              aria-label="书签和 Google 搜索建议"
+              aria-busy={googleSuggestionStatus === 'loading'}
               onmousedown={(event) => event.preventDefault()}
             >
-              <div class="suggestion-primary">
-                <button
-                  id="search-option-primary"
-                  type="button"
-                  class:active={activeSearchOptionIndex === 0}
-                  class="suggestion-action"
-                  role="option"
-                  aria-selected={activeSearchOptionIndex === 0}
-                  onclick={() => navigateToSearchTarget(searchDraft)}
-                >
-                  <Icon icon={historyIcon} width="18" aria-hidden="true" />
-                  <span class="suggestion-copy">
-                    <span class="suggestion-title">{searchDraft.trim()}</span>
-                    <span class="suggestion-meta">- Google 搜索</span>
-                  </span>
-                </button>
-                <button type="button" class="suggestion-clear" aria-label="清空搜索" onclick={clearSearch}>
-                  <Icon icon={xIcon} width="18" aria-hidden="true" />
-                </button>
-              </div>
-              {#each googleSuggestions as suggestion, index (suggestion)}
-                <button
-                  id={getSearchOptionId(index + 1)}
-                  type="button"
-                  class:active={activeSearchOptionIndex === index + 1}
-                  class="suggestion-row"
-                  role="option"
-                  aria-selected={activeSearchOptionIndex === index + 1}
-                  onclick={() => navigateToSearchTarget(suggestion)}
-                >
-                  <Icon class="suggestion-icon" icon={searchIcon} width="18" aria-hidden="true" />
-                  <span class="suggestion-copy"><span class="suggestion-title">{suggestion}</span></span>
-                </button>
+              {#each searchOptions as option, index (option.id)}
+                {#if option.kind === 'bookmark'}
+                  {@const faviconUrls = getFaviconUrlCandidates(option.item.url)}
+                  <button
+                    id={option.id}
+                    type="button"
+                    class="suggestion-row suggestion-bookmark"
+                    class:active={activeSearchOptionIndex === index}
+                    role="option"
+                    aria-selected={activeSearchOptionIndex === index}
+                    aria-label={`打开书签：${option.item.title}`}
+                    onclick={() => activateHomeSearchOption(option)}
+                  >
+                    <span class="suggestion-bookmark-icon" aria-hidden="true">
+                      <Icon icon={bookmarkIcon} width="16" />
+                      {#if faviconUrls[0]}
+                        <img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />
+                      {/if}
+                    </span>
+                    <span class="suggestion-copy">
+                      <span class="suggestion-title">{option.item.title}</span>
+                      <span class="suggestion-meta">书签 · {option.item.domain ?? getDisplayUrl(option.item.url ?? '')}</span>
+                    </span>
+                    <span class="suggestion-open-hint" aria-hidden="true">打开</span>
+                  </button>
+                {:else if option.source === 'raw'}
+                  <div class="suggestion-primary" class:after-bookmarks={index > 0}>
+                    <button
+                      id={option.id}
+                      type="button"
+                      class="suggestion-action"
+                      class:active={activeSearchOptionIndex === index}
+                      role="option"
+                      aria-selected={activeSearchOptionIndex === index}
+                      onclick={() => activateHomeSearchOption(option)}
+                    >
+                      <Icon icon={historyIcon} width="18" aria-hidden="true" />
+                      <span class="suggestion-copy">
+                        <span class="suggestion-title">{option.query}</span>
+                        <span class="suggestion-meta">- {isDirectNavigationInput(option.query) ? '打开网址' : 'Google 搜索'}</span>
+                      </span>
+                    </button>
+                    <button type="button" class="suggestion-clear" aria-label="清空搜索" onclick={clearSearch}>
+                      <Icon icon={xIcon} width="18" aria-hidden="true" />
+                    </button>
+                  </div>
+                {:else}
+                  <button
+                    id={option.id}
+                    type="button"
+                    class="suggestion-row suggestion-google"
+                    class:first-google={isFirstGoogleSearchOption(index)}
+                    class:active={activeSearchOptionIndex === index}
+                    role="option"
+                    aria-selected={activeSearchOptionIndex === index}
+                    onclick={() => activateHomeSearchOption(option)}
+                  >
+                    <Icon class="suggestion-icon" icon={searchIcon} width="18" aria-hidden="true" />
+                    <span class="suggestion-copy">
+                      <span class="suggestion-title">{option.query}</span>
+                      <span class="suggestion-meta">Google 建议</span>
+                    </span>
+                  </button>
+                {/if}
               {/each}
             </div>
           {/if}
+          <span class="visually-hidden" role="status" aria-live="polite">
+            {googleSuggestionStatus === 'loading'
+              ? '正在获取 Google 搜索建议'
+              : googleSuggestionStatus === 'ready' && googleSuggestions.length > 0
+                ? `已获取 ${googleSuggestions.length} 条 Google 搜索建议`
+                : googleSuggestionStatus === 'unavailable'
+                  ? 'Google 搜索建议暂时不可用，仍可打开书签或直接搜索'
+                  : ''}
+          </span>
         </form>
       </section>
 
