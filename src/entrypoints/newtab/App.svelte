@@ -69,6 +69,14 @@
     | { kind: 'bookmark'; id: string; item: SearchIndexItem }
     | { kind: 'query'; id: string; source: 'raw' | 'google'; query: string };
 
+  type BookmarkHomeSearchOption = Extract<HomeSearchOption, { kind: 'bookmark' }>;
+  type QueryHomeSearchOption = Extract<HomeSearchOption, { kind: 'query' }>;
+
+  interface IndexedSearchOption<T extends HomeSearchOption> {
+    option: T;
+    index: number;
+  }
+
   type GoogleSuggestionStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 
   interface BookmarkEditorState {
@@ -151,6 +159,8 @@
   let googleSuggestions: string[] = [];
   let googleSuggestionStatus: GoogleSuggestionStatus = 'idle';
   let searchOptions: HomeSearchOption[] = [];
+  let bookmarkSearchEntries: IndexedSearchOption<BookmarkHomeSearchOption>[] = [];
+  let querySearchEntries: IndexedSearchOption<QueryHomeSearchOption>[] = [];
   let showSearchSuggestions = false;
   let activeSearchOptionId: string | undefined;
   let bookmarkSearchIndex: SearchIndexItem[] = [];
@@ -185,6 +195,14 @@
     ];
   }
   $: searchOptions = getHomeSearchOptions(bookmarkSearchIndex, searchDraft, googleSuggestions);
+  $: {
+    bookmarkSearchEntries = [];
+    querySearchEntries = [];
+    searchOptions.forEach((option, index) => {
+      if (option.kind === 'bookmark') bookmarkSearchEntries.push({ option, index });
+      else querySearchEntries.push({ option, index });
+    });
+  }
   $: scheduleGoogleSuggestions(searchDraft);
   $: showSearchSuggestions = searchFocused && !searchSuggestionsDismissed && searchOptions.length > 0;
   $: if (activeSearchOptionIndex >= searchOptions.length) activeSearchOptionIndex = searchOptions.length - 1;
@@ -1213,71 +1231,87 @@
               aria-busy={googleSuggestionStatus === 'loading'}
               onmousedown={(event) => event.preventDefault()}
             >
-              {#each searchOptions as option, index (option.id)}
-                {#if option.kind === 'bookmark'}
-                  {@const faviconUrls = getFaviconUrlCandidates(option.item.url)}
-                  <button
-                    id={option.id}
-                    type="button"
-                    class="suggestion-row suggestion-bookmark"
-                    class:active={activeSearchOptionIndex === index}
-                    role="option"
-                    aria-selected={activeSearchOptionIndex === index}
-                    aria-label={`打开书签：${option.item.title}`}
-                    onclick={() => activateHomeSearchOption(option)}
-                  >
-                    <span class="suggestion-bookmark-icon" aria-hidden="true">
-                      <Icon icon={bookmarkIcon} width="16" />
-                      {#if faviconUrls[0]}
-                        <img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />
-                      {/if}
-                    </span>
-                    <span class="suggestion-copy">
-                      <span class="suggestion-title">{option.item.title}</span>
-                      <span class="suggestion-meta">书签 · {option.item.domain ?? getDisplayUrl(option.item.url ?? '')}</span>
-                    </span>
-                    <span class="suggestion-open-hint" aria-hidden="true">打开</span>
-                  </button>
-                {:else if option.source === 'raw'}
-                  <div class="suggestion-primary" class:after-bookmarks={index > 0}>
+              {#if bookmarkSearchEntries.length > 0}
+                <div class="search-suggestion-group" role="group" aria-labelledby="bookmark-suggestions-label">
+                  <p id="bookmark-suggestions-label" class="search-suggestion-label">匹配书签</p>
+                  <div class="search-bookmark-grid">
+                    {#each bookmarkSearchEntries as { option, index } (option.id)}
+                      {@const faviconUrls = getFaviconUrlCandidates(option.item.url)}
+                      <button
+                        id={option.id}
+                        type="button"
+                        class="suggestion-row suggestion-bookmark"
+                        class:active={activeSearchOptionIndex === index}
+                        role="option"
+                        aria-selected={activeSearchOptionIndex === index}
+                        aria-label={`打开书签：${option.item.title}`}
+                        title={option.item.title}
+                        onclick={() => activateHomeSearchOption(option)}
+                      >
+                        <span class="suggestion-bookmark-icon" aria-hidden="true">
+                          <Icon icon={bookmarkIcon} width="16" />
+                          {#if faviconUrls[0]}
+                            <img src={faviconUrls[0]} data-index="0" data-sources={faviconUrls.join('\n')} alt="" loading="lazy" onload={handleFaviconLoad} onerror={handleFaviconError} />
+                          {/if}
+                        </span>
+                        <span class="suggestion-copy">
+                          <span class="suggestion-title">{option.item.title}</span>
+                          <span class="suggestion-meta">{option.item.domain ?? getDisplayUrl(option.item.url ?? '')}</span>
+                        </span>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              <div
+                class="search-suggestion-group search-query-group"
+                class:after-bookmarks={bookmarkSearchEntries.length > 0}
+                role="group"
+                aria-labelledby="query-suggestions-label"
+              >
+                <p id="query-suggestions-label" class="search-suggestion-label">搜索与建议</p>
+                {#each querySearchEntries as { option, index } (option.id)}
+                  {#if option.source === 'raw'}
+                    <div class="suggestion-primary">
+                      <button
+                        id={option.id}
+                        type="button"
+                        class="suggestion-action"
+                        class:active={activeSearchOptionIndex === index}
+                        role="option"
+                        aria-selected={activeSearchOptionIndex === index}
+                        onclick={() => activateHomeSearchOption(option)}
+                      >
+                        <Icon icon={historyIcon} width="18" aria-hidden="true" />
+                        <span class="suggestion-copy">
+                          <span class="suggestion-title">{option.query}</span>
+                          <span class="suggestion-meta">- {isDirectNavigationInput(option.query) ? '打开网址' : 'Google 搜索'}</span>
+                        </span>
+                      </button>
+                      <button type="button" class="suggestion-clear" aria-label="清空搜索" onclick={clearSearch}>
+                        <Icon icon={xIcon} width="18" aria-hidden="true" />
+                      </button>
+                    </div>
+                  {:else}
                     <button
                       id={option.id}
                       type="button"
-                      class="suggestion-action"
+                      class="suggestion-row suggestion-google"
+                      class:first-google={isFirstGoogleSearchOption(index)}
                       class:active={activeSearchOptionIndex === index}
                       role="option"
                       aria-selected={activeSearchOptionIndex === index}
                       onclick={() => activateHomeSearchOption(option)}
                     >
-                      <Icon icon={historyIcon} width="18" aria-hidden="true" />
+                      <Icon class="suggestion-icon" icon={searchIcon} width="18" aria-hidden="true" />
                       <span class="suggestion-copy">
                         <span class="suggestion-title">{option.query}</span>
-                        <span class="suggestion-meta">- {isDirectNavigationInput(option.query) ? '打开网址' : 'Google 搜索'}</span>
+                        <span class="suggestion-meta">Google 建议</span>
                       </span>
                     </button>
-                    <button type="button" class="suggestion-clear" aria-label="清空搜索" onclick={clearSearch}>
-                      <Icon icon={xIcon} width="18" aria-hidden="true" />
-                    </button>
-                  </div>
-                {:else}
-                  <button
-                    id={option.id}
-                    type="button"
-                    class="suggestion-row suggestion-google"
-                    class:first-google={isFirstGoogleSearchOption(index)}
-                    class:active={activeSearchOptionIndex === index}
-                    role="option"
-                    aria-selected={activeSearchOptionIndex === index}
-                    onclick={() => activateHomeSearchOption(option)}
-                  >
-                    <Icon class="suggestion-icon" icon={searchIcon} width="18" aria-hidden="true" />
-                    <span class="suggestion-copy">
-                      <span class="suggestion-title">{option.query}</span>
-                      <span class="suggestion-meta">Google 建议</span>
-                    </span>
-                  </button>
-                {/if}
-              {/each}
+                  {/if}
+                {/each}
+              </div>
             </div>
           {/if}
           <span class="visually-hidden" role="status" aria-live="polite">
