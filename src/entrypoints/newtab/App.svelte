@@ -95,7 +95,8 @@
   const homeBookmarkResultLimit = 5;
   const bookmarkFolderResultLimit = 6;
   const bookmarkResultLimit = 8;
-  const searchSuggestionDebounce = 250;
+  const searchSuggestionDebounce = 100;
+  const searchSuggestionLoadingDelay = 300;
   const jumpFeedbackDuration = 1200;
 
   let theme: ThemeMode = defaultSettings.theme;
@@ -144,6 +145,7 @@
   let jumpTargetFolderId: string | undefined;
   let jumpFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
   let bingSuggestionTimer: ReturnType<typeof setTimeout> | undefined;
+  let bingSuggestionLoadingTimer: ReturnType<typeof setTimeout> | undefined;
   let bingSuggestionController: AbortController | undefined;
   let bingSuggestionRequestId = 0;
   let scheduledBingSuggestionQuery = '';
@@ -231,6 +233,7 @@
     observerResizeQuery?.removeEventListener('change', handleObserverLayoutChange);
     if (jumpFeedbackTimer) clearTimeout(jumpFeedbackTimer);
     if (bingSuggestionTimer) clearTimeout(bingSuggestionTimer);
+    if (bingSuggestionLoadingTimer) clearTimeout(bingSuggestionLoadingTimer);
     bingSuggestionController?.abort();
   });
 
@@ -936,18 +939,17 @@
     bingSuggestionRequestId += 1;
     if (bingSuggestionTimer) clearTimeout(bingSuggestionTimer);
     bingSuggestionTimer = undefined;
+    if (bingSuggestionLoadingTimer) clearTimeout(bingSuggestionLoadingTimer);
+    bingSuggestionLoadingTimer = undefined;
     bingSuggestionController?.abort();
     bingSuggestionController = undefined;
     bingSuggestions = [];
     bingSuggestionError = '';
+    bingSuggestionStatus = 'idle';
 
-    if (!canRequestSearchSuggestions(query)) {
-      bingSuggestionStatus = 'idle';
-      return;
-    }
+    if (!canRequestSearchSuggestions(query)) return;
 
     const requestId = bingSuggestionRequestId;
-    bingSuggestionStatus = 'loading';
     bingSuggestionTimer = setTimeout(() => {
       bingSuggestionTimer = undefined;
       void loadBingSuggestions(query, requestId);
@@ -956,7 +958,15 @@
 
   async function loadBingSuggestions(query: string, requestId: number) {
     const controller = new AbortController();
+    const loadingTimer = setTimeout(() => {
+      if (
+        requestId === bingSuggestionRequestId &&
+        !controller.signal.aborted &&
+        searchDraft.trim() === query
+      ) bingSuggestionStatus = 'loading';
+    }, searchSuggestionLoadingDelay);
     bingSuggestionController = controller;
+    bingSuggestionLoadingTimer = loadingTimer;
     try {
       const suggestions = await requestBingQuerySuggestions(query, controller.signal);
       if (
@@ -973,6 +983,8 @@
       bingSuggestionError = error instanceof Error ? error.message : 'Unknown Bing suggestion error.';
       bingSuggestionStatus = 'unavailable';
     } finally {
+      clearTimeout(loadingTimer);
+      if (bingSuggestionLoadingTimer === loadingTimer) bingSuggestionLoadingTimer = undefined;
       if (bingSuggestionController === controller) bingSuggestionController = undefined;
     }
   }

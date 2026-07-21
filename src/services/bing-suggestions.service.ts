@@ -3,7 +3,7 @@ const BING_SUGGESTIONS_URLS = [
   'https://www.bing.com/osjson.aspx',
 ];
 const suggestionLimit = 9;
-const requestTimeout = 5000;
+const requestTimeout = 1500;
 const cacheLifetime = 5 * 60 * 1000;
 const cacheLimit = 50;
 
